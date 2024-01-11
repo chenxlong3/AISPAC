@@ -47,6 +47,7 @@ typedef std::pair<uint32_t, uint32_t> PairIntInt;
 typedef std::pair<uint32_t, double> PairIntDouble;
 typedef std::pair<uint32_t, size_t> PairIntSizet;
 typedef std::pair<size_t, size_t> PairSizet;
+typedef std::pair<size_t, double> PairSizetDouble;
 typedef std::vector<std::set<uint32_t>> VecSetInt;
 typedef std::vector<int16_t> VecInt16;
 typedef std::vector<VecInt16> VecVecInt16;
