@@ -231,7 +231,7 @@ void run_only_IMA(InfGraph& g) {
     ofstream log_file(log_filename);
     log_info("--- Start generating RR sets ---");
     // IEM::generate_RRsets(g);
-    IE::stopping_rules(g);
+    IE::stopping_rules(g, false);
     timer.log_operation_time("RR set generation", log_file);
 
     g.IMA();
@@ -245,6 +245,48 @@ void run_only_IMA(InfGraph& g) {
     timer.log_operation_time("Select by outdeg", log_file);
     g.select_edges_by_prob();
     timer.log_operation_time("Select by prob", log_file);
+}
+
+void run_only_AISPAC(InfGraph& g) {
+    g.create_param_dir();
+
+    log_info("--- Setting seed set ---");
+    if (check_file_exist(g._seed_filename)) {
+        g.set_seed("IM", true);
+    } else {
+        if (g._seed_mode == "IM")
+        {
+            IMM::influence_maximize(g, g.args);
+            g.set_seed("IM", false);
+            g.clean_RRsets_InfGraph();
+        }
+        else {
+            g.set_seed(g._seed_mode, false);
+        }
+    }
+    if (check_file_exist(g._cand_edges_filename)) {
+        log_info("--- Reading the candidate edges ---");
+        g.read_cand_edges();
+    } else {
+        log_info("--- Generating the candidate edges ---");
+        if (g.args.num_cand_edges == 0) {
+         g.generate_candidate_edges();
+        } else
+         g.generate_candidate_edges(g.args.num_cand_edges);
+    }
+    string timer_name = "AISPAC_" + g.folder;
+    Timer timer = Timer(timer_name.c_str());
+    string param_folder = g._cur_working_folder;
+    string log_filename = param_folder + "logs_for_AISPAC.txt";
+    ofstream log_file(log_filename);
+    log_info("--- Start generating RR sets ---");
+    // IEM::generate_RRsets(g);
+    IE::stopping_rules(g, false);
+    timer.log_operation_time("RR set generation", log_file);
+
+    g.select_edges_by_AISPAC();
+    timer.log_till_now("AISPAC", log_file);
+    return;
 }
 
 void run_only_RWGreedy(InfGraph& g) {
