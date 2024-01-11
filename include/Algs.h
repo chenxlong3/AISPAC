@@ -141,8 +141,9 @@ public:
 
 class IE {
     public:
-        static double stopping_rules(InfGraph& g) {
+        static double stopping_rules(InfGraph& g, bool error_divide=true) {
             double eps_over_k = g.args.epsilon / (double)g.args.k_edges;
+            if (!error_divide)  eps_over_k = g.args.epsilon;
             double eps = eps_over_k / (2 + eps_over_k);
             if (g._vec_cand_edges.size() == 0) {
                 log_info("VITAL: Please load the candidate edges first.");
@@ -155,6 +156,11 @@ class IE {
             ASSERT(k_seed > 0);
 
             double Gamma = 2*(1 + eps)*(1 + eps/3)*log(2.0 / delta) / (eps*eps*beta);
+            if (!error_divide)
+            {
+                Gamma = 2*(1 + eps)*(1 + eps/3)*(log(2.0 / delta) + logcnk(min_cand_n, g.args.k_edges)) / (eps*eps*beta);
+            }
+            
             size_t theta=0;
             double Sigma=0.0;
             log_info("Gamma", Gamma);
