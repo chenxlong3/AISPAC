@@ -380,26 +380,36 @@ class InfGraph: public GraphBase {
 
         double edge_selection_with_PMC(uint32_t k) {
             double delta_influence = 0.0;
-            VecVecInt32 RRsets_delta;
-            VecVecLargeNum node_to_RRsets_delta (this->n);
-
+        
+            VecVecInt32 RRsets_delta;       // Marginal RR sets, all RR sets not covered by S
+            VecVecLargeNum node_to_RRsets_delta (this->n);  // node to RR sets not covered by S
+            
+            // Extract delta RR sets
+            size_t cur_idx = 0;
             for(size_t i=0; i<this->_RRsets.size(); i++) {
+                // if RR set i is covered by S
+                if (this->_vec_bool_RRset_cov_by_S[i]) {
+                    continue;
+                }
                 auto& RRset = this->_RRsets[i];
+                
                 VecuInt32 tmp_RRset;
-                for(auto& node: RRset) {
-                    if (!this->_vec_bool_seed[node]) {
-                        tmp_RRset.push_back(node);
-                        node_to_RRsets_delta[node].push_back(i);
-                    }
+                for(auto node: RRset) {
+                    tmp_RRset.push_back(node);      // current RR set covers node
+                    node_to_RRsets_delta[node].push_back(cur_idx);
                 }
                 RRsets_delta.push_back(tmp_RRset);
+                cur_idx++;
             }
-
+            VecDouble live_prob_per_RRset(RRsets_delta.size(), 1.0);    // store the live probability of every RR set
+            log_info("Finish extrating marginal RR sets");
             // Use a heap to store the <node, prob coverage> pair
             std::priority_queue<PairIntDouble, std::vector<PairIntDouble>, CompareBySecondDouble> heap;
             VecDouble coverage(this->n, 0.0);       // coverage[v] is the expected number of RR sets covered by v
+            
             for(uint32_t i=0; i<this->n; i++) {
                 // store coverage
+                // if the node is not covered 
                 if (this->_vec_node_prob_heap[i].empty())
                     continue;
                 double prob_for_i = this->_vec_node_prob_heap[i].top().second;
@@ -408,13 +418,15 @@ class InfGraph: public GraphBase {
                 heap.push(tmp);
                 coverage[i] = node_i_cov;
             }
+            log_info("Finish initializing marginal coverage, start selection");
+
             this->_vec_selected_edges.clear();
             uint32_t max_idx;
             double cov_num = 0.0;
             while (this->_vec_selected_edges.size() < k) {
-                PairIntInt top = heap.top();
+                PairIntDouble top = heap.top();
                 heap.pop();
-                
+
                 // Lazy Update
                 if (top.second > coverage[top.first]) {
                     // Update coverage of top
@@ -424,9 +436,10 @@ class InfGraph: public GraphBase {
                 }
                 max_idx = top.first;
                 cov_num += coverage[max_idx];
+                double origin_cov = coverage[max_idx];
                 
                 // selection
-                double top_edge_idx = this->_vec_node_prob_heap[max_idx].top().first;   // the index of the target edge
+                size_t top_edge_idx = this->_vec_node_prob_heap[max_idx].top().first;   // the index of the target edge
                 double top_prob = this->_vec_node_prob_heap[max_idx].top().second;      // the probability of the target edge
 
                 this->_vec_node_prob_heap[max_idx].pop();       // pop the edge for node max_idx
@@ -434,18 +447,37 @@ class InfGraph: public GraphBase {
 
                 // After selecting one node, we need to reduce marginal gain of every node
                 // e: the RR sets covered by the node max_idx
-                VecLargeNum e = node_to_RRsets_delta[max_idx];
-                for (uint32_t j=0; j<e.size(); j++) {
-                    NodeList node_list = RRsets_delta[e[j]];
-                    for (uint32_t l=0; l<node_list.size(); ++l){
-                        if (!this->_vec_node_prob_heap[node_list[l]].empty()) {
-                            double cur_node_prob = this->_vec_node_prob_heap[node_list[l]].top().second;
-                            coverage[node_list[l]] -= top_prob * cur_node_prob;
+                VecLargeNum& RRsets_cov_by_max_node = node_to_RRsets_delta[max_idx];
+                for (uint32_t j=0; j<RRsets_cov_by_max_node.size(); j++) {
+                    size_t RRset_idx = RRsets_cov_by_max_node[j];
+                    NodeList node_list = RRsets_delta[RRset_idx];
+                    for (uint32_t& node: node_list){
+                        if (node != max_idx && !this->_vec_node_prob_heap[node].empty()) {
+                            double cur_node_prob = this->_vec_node_prob_heap[node].top().second;
+                            coverage[node] -= (live_prob_per_RRset[RRset_idx]*top_prob * cur_node_prob);
                         }
                     }
+                    // update RR set live prob
+                    live_prob_per_RRset[RRset_idx] *= (1 - top_prob);
+                }
+                
+                //update edges pointing to the same node
+                coverage[max_idx] = 0.0;
+                if (!this->_vec_node_prob_heap[max_idx].empty()) {
+                    // log_info("after update", coverage[max_idx]);
+                    for (uint32_t j=0; j<RRsets_cov_by_max_node.size(); j++) {
+                        size_t RRset_idx = RRsets_cov_by_max_node[j];
+                        coverage[max_idx] += live_prob_per_RRset[RRset_idx];
+                    }
+                    double new_prob = this->_vec_node_prob_heap[max_idx].top().second;
+                    coverage[max_idx] *= new_prob;
+                    heap.push(make_pair(max_idx, coverage[max_idx]));
                 }
             }
-            return cov_num * this->n / this->_cur_RRsets_num;
+            log_info("cov_num", cov_num);
+            log_info("original cov", this->_vec_bool_RRset_cov_by_S.count());
+
+            return (cov_num + this->_vec_bool_RRset_cov_by_S.count()) * this->n / this->_cur_RRsets_num;
         }
 
         double node_selection(uint32_t k) {
@@ -802,6 +834,43 @@ class InfGraph: public GraphBase {
                 }
             }
             return;
+        }
+
+        double estimate_by_pmc(std::vector<UVWEdge>& selected_edges) {
+            ASSERT(this->_RRsets.size() > 0);
+            this->init_RRsets_cov_by_S();
+            double cov_num = 0.0;
+            VecBool included_in_A (this->n, false);
+            std::unordered_map<uint32_t, std::vector<double>> node_probs_map;
+            for (auto& e_tuple: selected_edges) {
+                uint32_t target_node = e_tuple.second.first;
+                double w = e_tuple.second.second;
+                node_probs_map[target_node].push_back(w);
+                included_in_A[target_node] = true;
+            }
+            log_info("include in A", included_in_A.count());
+            for (size_t i=0; i<this->_RRsets.size(); i++) {
+                if (this->_vec_bool_RRset_cov_by_S[i]) {
+                    cov_num += 1;
+                    continue;
+                }
+                double prob_not_cov = 1.0;
+                for (uint32_t node: this->_RRsets[i])
+                {
+                    if (included_in_A[node]) {
+
+                        for (double p : node_probs_map[node]) {
+                            prob_not_cov *= (1.0 - p);
+                        }
+                    }
+                    
+                }
+                
+                cov_num += (double)(1.0 - prob_not_cov);
+            }
+            log_info("cov by s", this->_vec_bool_RRset_cov_by_S.count());
+            printf("cov-num:%.3f\n", cov_num);
+            return cov_num * this->n / this->_cur_RRsets_num;
         }
 
         void init_from_files(bool load_cand_edges=true) {
@@ -1351,13 +1420,16 @@ class InfGraph: public GraphBase {
             
             write_UVWEdges(this->_vec_selected_edges, this->_cur_working_folder+"selected_edges_IMA.txt");
             log_file << "Result by AIS: " << this->comp_inf_cov_by_S() << '\n';
+            log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
+            
+            
             return;
         }
 
         void select_edges_by_AISPAC() {
             ASSERT(this->_seed_set_to_augment.size() > 0);
             ASSERT(this->_cur_RRsets_num > 0);
-
+            // preparation
             string log_filename = this->_cur_working_folder + "log_AISPAC.txt";
             ofstream log_file(log_filename);
 
@@ -1372,6 +1444,7 @@ class InfGraph: public GraphBase {
             
             log_info("--- Start Reading Candidate Edges ---");
             this->read_cand_edges();
+
             // Traverse cand_edges and organize probability
             for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
                 uint32_t v = this->_vec_cand_edges[i].second.first;
@@ -1381,7 +1454,7 @@ class InfGraph: public GraphBase {
             log_info("Finish organizing prob");
             
             // optimize PMC
-            this->edge_selection_with_PMC(this->args.k_edges);
+            double res_inf = this->edge_selection_with_PMC(this->args.k_edges);
 
             // self-evaluate
             this->update_RRsets_cov_by_S(this->_vec_selected_edges);
@@ -1390,7 +1463,8 @@ class InfGraph: public GraphBase {
             timer.log_total_time(log_file);
             
             write_UVWEdges(this->_vec_selected_edges, this->_cur_working_folder+"selected_edges_AISPAC.txt");
-            log_file << "Result by AISPAC: " << this->comp_inf_cov_by_S() << '\n';
+            log_file << "Result by AISPAC: " << res_inf << '\n';
+            log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
             return;
         }
 
