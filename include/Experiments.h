@@ -231,7 +231,7 @@ void run_only_IMA(InfGraph& g) {
     ofstream log_file(log_filename);
     log_info("--- Start generating RR sets ---");
     // IEM::generate_RRsets(g);
-    IE::stopping_rules(g, false);
+    IE::stopping_rules(g, true);
     timer.log_operation_time("RR set generation", log_file);
 
     g.IMA();
