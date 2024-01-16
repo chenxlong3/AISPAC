@@ -24,15 +24,27 @@ struct CompareBySecondDouble {
 	}
 };
 
+// All arguments passed to func
 class Argument{
 public:
-    uint32_t k_seed;
-    uint32_t k_edges;
-    uint32_t num_cand_edges;
-    double epsilon;
-    double delta;
-    CascadeModel model;
-    uint32_t beta=1;
+    uint32_t rand_seed = 0;
+    string folder_name = "";
+    string graph_file = "";
+    string probability_mode = "";
+    
+    CascadeModel model = IC;
+    string str_model = "";
+    
+    string seed_mode = "";
+    string method="";
+
+    uint32_t k_seed=0, k_edges = 0, beta = 1;
+    double epsilon = 0;
+    double delta=0;
+    
+    bool fast_truncated = true;
+    uint32_t num_cand_edges = 0;
+    size_t num_samples = 0;     // num_mc or num of RR sets
     
     Argument() {
 
@@ -55,6 +67,41 @@ public:
         this->model = _model;
         this->beta = _beta;
     };
+    void check_arguments_eligible() {
+        if (this->folder_name == "")
+            ExitMessage("argument dataset missing");
+        if (this->k_seed == 0)
+            ExitMessage("argument k_seed missing");
+        if (this->k_edges == 0)
+            ExitMessage("argument k_edges missing");
+        if (this->epsilon == 0)
+            ExitMessage("argument epsilon missing");
+        if (this->delta == 0)
+            ExitMessage("argument delta missing");
+
+        if (this->rand_seed == 0)
+            log_info("argument rand_seed missing, 0 as default");
+        if (this->str_model == "")
+            log_info("argument model missing, IC as default");
+        if (this->method == "") {
+            log_info("argument method missing, AISPAC as default");
+            this->method = "AISPAC";
+        }
+        if (this->seed_mode == "") {
+            log_info("argument seed_mode missing, IM as default");
+            this->seed_mode = "IM";
+        }
+        if (this->probability_mode == "") {
+            log_info("argument probability_mode missing, NONE as default");
+            this->probability_mode == "NONE";
+        }
+        if (this->graph_file == "") {
+            log_info("argument graph_file missing, vec.graph as default");
+            this->graph_file = "vec.graph";
+        }
+
+        return;
+    }
 };
 
 class InfGraph: public GraphBase {
@@ -104,7 +151,6 @@ class InfGraph: public GraphBase {
             this->_node_to_RRsets.resize(this->n);
             this->_vec_bool_vis.resize(this->n, false);
             this->_vec_bool_seed.resize(this->n, false);
-            // this->_node_sampled_times.resize(this->n, 0);
             return;
         }
 
@@ -126,6 +172,11 @@ class InfGraph: public GraphBase {
 
         void set_casc_model(CascadeModel model) {
             this->_casc_model = model;
+            return;
+        }
+
+        void set_args(Argument arguments) {
+            this->args = arguments;
             return;
         }
 
@@ -384,7 +435,7 @@ class InfGraph: public GraphBase {
             VecVecInt32 RRsets_delta;       // Marginal RR sets, all RR sets not covered by S
             VecVecLargeNum node_to_RRsets_delta (this->n);  // node to RR sets not covered by S
             
-            // Extract delta RR sets
+            // Re-index the RR sets not covered by S
             size_t cur_idx = 0;
             for(size_t i=0; i<this->_RRsets.size(); i++) {
                 // if RR set i is covered by S
@@ -454,7 +505,7 @@ class InfGraph: public GraphBase {
                     for (uint32_t& node: node_list){
                         if (node != max_idx && !this->_vec_node_prob_heap[node].empty()) {
                             double cur_node_prob = this->_vec_node_prob_heap[node].top().second;
-                            coverage[node] -= (live_prob_per_RRset[RRset_idx]*top_prob * cur_node_prob);
+                            coverage[node] -= (live_prob_per_RRset[RRset_idx] * top_prob * cur_node_prob);
                         }
                     }
                     // update RR set live prob
@@ -464,13 +515,14 @@ class InfGraph: public GraphBase {
                 //update edges pointing to the same node
                 coverage[max_idx] = 0.0;
                 if (!this->_vec_node_prob_heap[max_idx].empty()) {
-                    // log_info("after update", coverage[max_idx]);
-                    for (uint32_t j=0; j<RRsets_cov_by_max_node.size(); j++) {
-                        size_t RRset_idx = RRsets_cov_by_max_node[j];
-                        coverage[max_idx] += live_prob_per_RRset[RRset_idx];
-                    }
+                    // for (uint32_t j=0; j<RRsets_cov_by_max_node.size(); j++) {
+                    //     size_t RRset_idx = RRsets_cov_by_max_node[j];
+                    //     coverage[max_idx] += live_prob_per_RRset[RRset_idx];
+                    // }
+                    
                     double new_prob = this->_vec_node_prob_heap[max_idx].top().second;
-                    coverage[max_idx] *= new_prob;
+                    coverage[max_idx] = origin_cov / top_prob * new_prob * (1-top_prob);
+                    // coverage[max_idx] *= new_prob;
                     heap.push(make_pair(max_idx, coverage[max_idx]));
                 }
             }
@@ -1421,7 +1473,6 @@ class InfGraph: public GraphBase {
             write_UVWEdges(this->_vec_selected_edges, this->_cur_working_folder+"selected_edges_IMA.txt");
             log_file << "Result by AIS: " << this->comp_inf_cov_by_S() << '\n';
             log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
-            
             
             return;
         }
