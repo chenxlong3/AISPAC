@@ -5,6 +5,59 @@
 #include "Algs.h"
 #include "Timer.h"
 
+Argument parse_args(int argn, char *argv[]) {
+    Argument args;
+    string folder_name = "";
+    string probability_mode = "NONE";
+    double epsilon = 0;
+    string model = "";
+    uint32_t k_seed=0, k_edges = 0, beta = 1;
+    uint32_t rand_seed = 2023;
+    double delta = 0.0;
+    CascadeModel casc_model;
+    bool fast_truncated = false;
+    uint32_t num_cand_edges;
+    string seed_mode = "IM";
+    // For test
+    model = "IC";
+
+    for (int i = 0; i < argn; i++) {
+        if (argv[i] == string("-dataset")) args.folder_name = string(argv[i + 1]) + "/";
+        if (argv[i] == string("-graph_file")) args.graph_file = string(argv[i + 1]);
+        if (argv[i] == string("-epsilon")) args.epsilon = atof(argv[i + 1]);
+        if (argv[i] == string("-k_seed")) args.k_seed = atoi(argv[i + 1]);
+        if (argv[i] == string("-k_edges")) args.k_edges = atoi(argv[i + 1]);
+        if (argv[i] == string("-num_cand_edges")) args.num_cand_edges = atoi(argv[i + 1]);
+        if (argv[i] == string("-delta")) args.delta = atof(argv[i+1]);
+        if (argv[i] == string("-rand_seed")) args.rand_seed = atoi(argv[i + 1]);
+        if (argv[i] == string("-beta")) args.beta = atoi(argv[i + 1]);
+        if (argv[i] == string("-probability")) args.probability_mode = string(argv[i + 1]);
+        if (argv[i] == string("-seed_mode")) args.seed_mode = string(argv[i + 1]);
+        if (argv[i] == string("-num_samples")) args.num_samples = size_t(argv[i + 1]);
+
+        if (argv[i] == string("-fast")) {
+            string str_fast = string(argv[i+1]);
+            if (str_fast == string("True")) args.fast_truncated = true;
+            else if (str_fast == string("False")) args.fast_truncated = false;
+            else {
+                ExitMessage("Illegal input of fast: should be True or False");
+            }
+        }
+        if (argv[i] == string("-model")) {
+            if (argv[i + 1] == string("LT")) {
+                args.str_model = argv[i + 1];
+                args.model = LT;
+            } else if (argv[i + 1] == string("IC")) {
+                args.str_model = argv[i + 1];
+                args.model = IC;
+            } else
+                ExitMessage("model should be IC or LT");
+        }
+    } 
+    args.check_arguments_eligible();
+    return args;
+}
+
 InfGraph parseArg(int argn, char *argv[])
 {
     string folder_name = "";
@@ -18,7 +71,7 @@ InfGraph parseArg(int argn, char *argv[])
     bool fast_truncated = false;
     uint32_t num_cand_edges;
     string seed_mode = "IM";
-
+    size_t num_samples = 0;
     // For test
     model = "IC";
     k_seed = 50;
@@ -35,14 +88,15 @@ InfGraph parseArg(int argn, char *argv[])
         if (argv[i] == string("-beta")) beta = atoi(argv[i + 1]);
         if (argv[i] == string("-probability")) probability_mode = string(argv[i + 1]);
         if (argv[i] == string("-seed_mode")) seed_mode = string(argv[i + 1]);
+        if (argv[i] == string("-num_samples")) num_samples = size_t(argv[i + 1]);
 
         if (argv[i] == string("-fast")) {
-        string str_fast = string(argv[i+1]);
-        if (str_fast == string("True")) fast_truncated = true;
-        else if (str_fast == string("False")) fast_truncated = false;
-        else {
-            ExitMessage("Illegal input of fast: should be True or False");
-        }
+            string str_fast = string(argv[i+1]);
+            if (str_fast == string("True")) fast_truncated = true;
+            else if (str_fast == string("False")) fast_truncated = false;
+            else {
+                ExitMessage("Illegal input of fast: should be True or False");
+            }
         }
         if (argv[i] == string("-model")) {
             if (argv[i + 1] == string("LT")) {
@@ -90,6 +144,23 @@ InfGraph parseArg(int argn, char *argv[])
 
     return g;
 }
+
+void format_graph(int argn, char *argv[]) {
+    string folder_name = "";
+    string filename = "";
+    for (int i = 0; i < argn; i++) {
+        if (argv[i] == string("-dataset")) folder_name = string(argv[i + 1]) + "/";
+        if (argv[i] == string("-filename")) filename = string(argv[i + 1]);
+    }
+
+    if (folder_name == "" || filename == "")
+        ExitMessage("argument dataset / filename missing");
+    InfGraph g;
+    g.format_graph(folder_name, filename);
+    return;
+}
+
+
 
 void test_generate_cand_edges_with_rand_seeds() {
     log_info("Test Generating candidate edges");
