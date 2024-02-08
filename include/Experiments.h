@@ -33,7 +33,8 @@ Argument parse_args(int argn, char *argv[]) {
         if (argv[i] == string("-beta")) args.beta = atoi(argv[i + 1]);
         if (argv[i] == string("-probability")) args.probability_mode = string(argv[i + 1]);
         if (argv[i] == string("-seed_mode")) args.seed_mode = string(argv[i + 1]);
-        if (argv[i] == string("-num_samples")) args.num_samples = size_t(argv[i + 1]);
+        if (argv[i] == string("-method")) args.method = string(argv[i + 1]);
+        if (argv[i] == string("-num_samples")) args.num_samples = size_t(atoi(argv[i + 1]));
 
         if (argv[i] == string("-fast")) {
             string str_fast = string(argv[i+1]);
@@ -140,7 +141,7 @@ InfGraph parseArg(int argn, char *argv[])
     g._seed_mode = seed_mode;
     g._truncated_or_not = fast_truncated;
     g.set_args(k_seed, k_edges, num_cand_edges, epsilon, delta, casc_model, beta);
-    g.set_rand_seed(rand_seed);
+    // g.set_rand_seed(rand_seed);
 
     return g;
 }
@@ -170,19 +171,6 @@ void test_generate_cand_edges_with_rand_seeds() {
     log_info("Finish initializing the seeds, please check.");
     g.generate_candidate_edges(50);
     log_info("Finish generating, please check.");
-}
-
-void test_IMA() {
-    InfGraph g("../data/DBLP/");
-    log_info("Start generating RR sets");
-    g.set_seed();
-    log_info("--- Generating the candidate edges ---");
-    g.generate_candidate_edges(100);
-    log_info("--- Initialize the marginal coverage of every candidate edge ---");
-    g.init_seed_cov();
-    log_info("Start IMA");
-    g.IMA();
-    print_vector(g._vec_selected_edges);
 }
 
 
@@ -484,6 +472,80 @@ void experiment_efficacy(InfGraph& g) {
     return;
 }
 
+void run_method(InfGraph& g) {
+    g.create_param_dir();
+
+    log_info("--- Setting seed set ---");
+    if (check_file_exist(g._seed_filename)) {
+        g.set_seed("IM", true);
+    } else {
+        if (g._seed_mode == "IM")
+        {
+            IMM::influence_maximize(g, g.args);
+            g.set_seed("IM", false);
+            g.clean_RRsets_InfGraph();
+        }
+        else {
+            g.set_seed(g._seed_mode, false);
+        }
+    }
+    if (check_file_exist(g._cand_edges_filename)) {
+        log_info("--- Reading the candidate edges ---");
+        g.read_cand_edges();
+    } else {
+        log_info("--- Generating the candidate edges ---");
+        if (g.args.num_cand_edges == 0) {
+         g.generate_candidate_edges();
+        } else
+         g.generate_candidate_edges(g.args.num_cand_edges);
+    }
+    string method_name = g.args.method;
+    string timer_name = method_name + "_" + g.folder;
+    Timer timer = Timer(timer_name.c_str());
+    // string param_folder = g._cur_working_folder;
+    string log_filename = g._cur_working_folder + "logs.txt";
+    ofstream log_file(log_filename);
+    if (method_name == "ALL")
+    {
+        g.select_random_edges();
+        g.select_edges_by_outdegree();
+        timer.log_operation_time("Select by outdeg", log_file);
+        g.select_edges_by_prob();
+        timer.log_operation_time("Select by prob", log_file);
+    }
+    
+    if (method_name == "AIS") {
+        log_info("--- Start generating RR sets ---");
+        // IEM::generate_RRsets(g);
+
+        if (g.args.num_samples > 0) {
+            g.build_RRsets(g.args.num_samples, true);
+        }
+        else
+            IE::stopping_rules(g, true);
+        timer.log_operation_time("RR set generation", log_file);
+
+        g.IMA();
+        timer.log_till_now("AIS", log_file);
+
+        // g.select_edges_by_single_inf();
+        // g.select_edges_by_updated_inf();
+        // g.select_edges_by_AIS_U();
+    }
+    if (method_name == "AISPAC") {
+        log_info("--- Start generating RR sets ---");
+        if (g.args.num_samples > 0) {
+            g.build_RRsets(g.args.num_samples, true);
+        }
+        else
+            IE::stopping_rules(g, true);
+        timer.log_operation_time("RR set generation", log_file);
+
+        g.select_edges_by_AISPAC();
+        timer.log_till_now("AISPAC", log_file);
+    }
+
+}
 
 void select_outdegree(InfGraph& g) {
     g.create_param_dir();
