@@ -18,8 +18,9 @@ int main(int argc, char *argv[])
    dsfmt_gv_init_gen_rand(args.rand_seed);
    InfGraph g(args.folder_name, args.graph_file, args.probability_mode);
    g.set_args(args);    // setting arguments
-
-   run_only_IMA(g);
+   
+   run_method(g);
+   // run_only_IMA(g);
    // run_only_AISPAC(g);
    return 1;
 }
