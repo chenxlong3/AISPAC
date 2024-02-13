@@ -503,7 +503,7 @@ void run_method(InfGraph& g) {
     string timer_name = method_name + "_" + g.folder;
     Timer timer = Timer(timer_name.c_str());
     // string param_folder = g._cur_working_folder;
-    string log_filename = g._cur_working_folder + "logs.txt";
+    string log_filename = g._cur_working_folder + "logs_" + method_name + ".txt";
     ofstream log_file(log_filename);
     if (method_name == "ALL")
     {
@@ -524,9 +524,10 @@ void run_method(InfGraph& g) {
         else
             IE::stopping_rules(g, true);
         timer.log_operation_time("RR set generation", log_file);
-
-        g.IMA();
-        timer.log_till_now("AIS", log_file);
+        log_file.close();
+    
+        g.AIS(log_filename);
+        // timer.log_till_now("AIS", log_file);
 
         // g.select_edges_by_single_inf();
         // g.select_edges_by_updated_inf();
@@ -540,11 +541,25 @@ void run_method(InfGraph& g) {
         else
             IE::stopping_rules(g, true);
         timer.log_operation_time("RR set generation", log_file);
+        log_file.close();
 
-        g.select_edges_by_AISPAC();
-        timer.log_till_now("AISPAC", log_file);
+        g.select_edges_by_AISPAC(log_filename);
+        // timer.log_till_now("AISPAC", log_file);
     }
+    if (method_name == "AugIM")
+    {
+        log_info("--- Start generating RR sets ---");
+        if (g.args.num_samples > 0) {
+            g.build_RRsets(g.args.num_samples, true);
+        }
+        else
+            IE::stopping_rules(g, false);
+        timer.log_operation_time("RR set generation", log_file);
+        log_file.close();
 
+        g.select_edges_by_AugIM(log_filename);
+    }
+    
 }
 
 void select_outdegree(InfGraph& g) {
