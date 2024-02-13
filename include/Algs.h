@@ -156,11 +156,10 @@ class IE {
             ASSERT(k_seed > 0);
 
             double Gamma = 2*(1 + eps)*(1 + eps/3)*log(2.0 / delta) / (eps*eps*beta);
-            if (!error_divide)
-            {
-                Gamma = 2*(1 + eps)*(1 + eps/3)*(log(2.0 / delta) + logcnk(min_cand_n, g.args.k_edges)) / (eps*eps*beta);
+            if (!error_divide) {
+                Gamma = 2 * (1 + eps) * (1 + eps / 3) * (log(2.0 / delta) + logcnk(min_cand_n, g.args.k_edges)) / (eps * eps * beta);
             }
-            
+
             size_t theta=0;
             double Sigma=0.0;
             log_info("Gamma", Gamma);
@@ -182,4 +181,94 @@ class IE {
             return est_inf;
         }
 };
+
+class MAXCOV {
+public:
+    VecLargeNum max_cover_lazy(VecVecLargeNum vec_u, VecVecLargeNum vec_v, uint32_t target_size) {
+        size_t num_u = vec_u.size();
+        size_t num_v = vec_v.size();
+        VecLargeNum res;
+        VecLargeNum coverage(vec_u.size(), 0);
+        size_t max_cov = 0;
+        size_t sum_cov = 0;
+        for (auto i = num_u; i--;)
+        {
+            const auto deg = vec_u[i].size();
+            coverage[i] = deg;
+            if (deg > max_cov) max_cov = deg;
+        }
+        VecVecLargeNum deg_map(max_cov + 1); // deg_map: map degree to the nodes with this degree
+        for (auto i = num_u; i--;)
+        {
+            if (coverage[i] == 0) continue;
+            deg_map[coverage[i]].push_back(i);
+        }
+        VecBool lower_nodes_mark(num_v, false);
+        for (auto deg = max_cov; deg > 0; deg--) {
+            auto& vec_nodes = deg_map[deg];
+            for (auto idx = vec_nodes.size(); idx--;) {
+                auto argmax_idx = vec_nodes[idx];
+                const auto cur_cov = coverage[argmax_idx];
+                if (deg > cur_cov) {
+                    deg_map[cur_cov].push_back(argmax_idx);
+                    continue;
+                }
+                auto topk = target_size;
+				auto deg_bound = deg;
+				VecLargeNum vecBound(target_size);
+                
+                // Initialize vecBound
+				auto idx_bound = idx + 1;
+				while (topk && idx_bound--)
+				{
+					vecBound[--topk] = coverage[deg_map[deg_bound][idx_bound]];
+				}
+				while (topk && --deg_bound)
+				{
+					idx_bound = deg_map[deg_bound].size();
+					while (topk && idx_bound--)
+					{
+						vecBound[--topk] = coverage[deg_map[deg_bound][idx_bound]];
+					}
+				}
+				make_min_heap(vecBound);
+
+                // Find the top-k marginal coverage
+				auto flag = topk == 0;
+				while (flag && idx_bound--)
+				{
+					const auto cur_deg_bound = coverage[deg_map[deg_bound][idx_bound]];
+					if (vecBound[0] >= deg_bound)
+					{
+						flag = false;
+					}
+					else if (vecBound[0] < cur_deg_bound)
+					{
+						min_heap_replace_min_value(vecBound, cur_deg_bound);
+					}
+				}
+                while (flag && --deg_bound)
+				{
+					idx_bound = deg_map[deg_bound].size();
+					while (flag && idx_bound--)
+					{
+						const auto currdeg_bound = coverage[deg_map[deg_bound][idx_bound]];
+						if (vecBound[0] >= deg_bound)
+						{
+							flag = false;
+						}
+						else if (vecBound[0] < currdeg_bound)
+						{
+							min_heap_replace_min_value(vecBound, currdeg_bound);
+						}
+					}
+				}
+            }
+        }
+        return res;
+    }
+
+    
+};
+
 #endif

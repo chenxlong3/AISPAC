@@ -173,4 +173,130 @@ bool check_file_exist(string file_path) {
         return false;
     }
 }
+
+inline void make_min_heap(VecLargeNum& vec)
+{
+	// Min heap
+	const auto size = vec.size();
+	if (2 <= size)
+	{
+		for (auto hole = (size + 1) / 2; hole--;)
+		{
+			const auto val = vec[hole];
+			size_t i, child;
+			for (i = hole; i * 2 + 1 < size; i = child)
+			{
+				// Find smaller child
+				child = i * 2 + 2;
+				if (child == size || vec[child - 1] < vec[child])
+				{
+					// One child only or the left child is smaller than the right one
+					--child;
+				}
+
+				// Percolate one level
+				if (vec[child] < val)
+				{
+					vec[i] = vec[child];
+				}
+				else
+				{
+					break;
+				}
+			}
+			vec[i] = val;
+		}
+	}
+}
+
+/// Replace the value for the first element and down-heap this element.
+inline void min_heap_replace_min_value(VecLargeNum& vec, const size_t& val)
+{
+	// Increase the value of the first element
+	const auto size = vec.size();
+	size_t i, child;
+	for (i = 0; i * 2 + 1 < size; i = child)
+	{
+		// Find smaller child
+		child = i * 2 + 2;
+		if (child == size || vec[child - 1] < vec[child])
+		{
+			// One child only or the left child is smaller than the right one
+			--child;
+		}
+
+		// Percolate one level
+		if (vec[child] < val)
+		{
+			vec[i] = vec[child];
+		}
+		else
+		{
+			break;
+		}
+	}
+	vec[i] = val;
+}
+
+VecLargeNum max_cover_by_heap(VecVecLargeNum& vec_u, VecVecLargeNum& vec_v, uint32_t target_size) {
+        size_t num_u = vec_u.size();
+        size_t num_v = vec_v.size();
+        VecLargeNum res;
+        // Use a heap to store the <node, coverage> pair
+        std::priority_queue<PairIntSizet, std::vector<PairIntSizet>, CompareBySecond> heap;
+        VecLargeNum coverage(num_u, 0);       // coverage[v] is the RR sets covered by v
+        int cnt = 0;
+        for(uint32_t i=0; i<num_u; i++) {
+            // store coverage
+            size_t node_i_cov = vec_u[i].size();
+            PairIntSizet tmp(make_pair(i, node_i_cov));
+            heap.push(tmp);
+            coverage[i] = node_i_cov;
+            
+        }
+
+        VecBool RRsets_mark(vec_v.size(), false);
+        VecBool node_mark(num_u, false);   
+
+        uint32_t max_idx;
+        size_t cov_num = 0;
+        while (res.size() < target_size) {
+            PairIntSizet top = heap.top();
+            heap.pop();
+            // Lazy Update
+            if (top.second > coverage[top.first]) {
+                // Update coverage of top
+                top.second = coverage[top.first];
+                heap.push(top);
+                continue;
+            }
+            max_idx = top.first;
+            VecLargeNum& e = vec_u[max_idx];     // e: the RR sets covered by the node max_idx
+            cov_num += coverage[max_idx];
+            res.push_back(max_idx);
+            node_mark[max_idx] = true;
+
+            
+            // After selecting one node, we need to remove the covered RR sets from the coverage graph
+            // e: the RR sets covered by the node max_idx
+            for (uint32_t j=0; j<e.size(); j++) {
+                if (RRsets_mark[e[j]]) continue;        // If the RR set has been removed
+                VecLargeNum node_list = vec_v[e[j]];
+                
+                
+                for (uint32_t l=0; l<node_list.size(); ++l){
+                    if (!node_mark[node_list[l]]) {
+                        coverage[node_list[l]]--;
+                    }
+                }
+                RRsets_mark[e[j]] = true;
+            }
+            if (max_idx == 56035)
+            {
+                log_info("56035", coverage[56035]);
+                log_info("56004", coverage[56004]);
+            }
+        }
+        return res;
+    }
 #endif
