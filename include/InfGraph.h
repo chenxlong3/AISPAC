@@ -3,26 +3,7 @@
 #include "GraphBase.h"
 #include "Timer.h"
 
-struct CompareBySecond {
-	bool operator()(PairIntInt a,PairIntInt b)
-	{
-		return a.second < b.second;
-	}
-};
 
-struct CompareBySecondSizet {
-	bool operator()(PairIntSizet a,PairIntSizet b)
-	{
-		return a.second < b.second;
-	}
-};
-
-struct CompareBySecondDouble {
-	bool operator()(PairIntDouble a, PairIntDouble b)
-	{
-		return a.second < b.second;
-	}
-};
 
 // All arguments passed to func
 class Argument{
@@ -135,12 +116,11 @@ class InfGraph: public GraphBase {
         std::vector<UVWEdge> _vec_selected_edges_OUTDEG;   // vector of selected edges by degree
         std::vector<UVWEdge> _vec_selected_edges_MCGreedy;   // vector of selected edges by degree
         std::vector<UVWEdge> _vec_selected_edges_PROB;   // vector of selected edges by degree
-        std::vector<std::priority_queue<PairSizetDouble, std::vector<PairSizetDouble>, CompareBySecondDouble>> _vec_node_prob_heap;
+        std::vector<std::priority_queue<PairSizetDouble, std::vector<PairSizetDouble>, CompareBySecondDoubleForSizet>> _vec_node_prob_heap;
         
         string _cur_working_folder = "";
         string _cand_edges_filename = "";
         string _seed_filename = "";
-        uint32_t _rand_seed = 2023;
         Argument args = Argument(50, 5, 0.3);
         bool _truncated_or_not = false;
 
@@ -177,6 +157,21 @@ class InfGraph: public GraphBase {
 
         void set_args(Argument arguments) {
             this->args = arguments;
+            
+            this->_seed_mode = this->args.seed_mode;
+            this->_cand_edges_filename = this->folder + "candidate_edges_" + to_string(this->args.num_cand_edges) + "_" + this->_seed_mode + "_" + to_string(this->args.k_seed) + this->_prob_mode + ".txt";
+            this->_seed_filename = this->folder + "seeds_" + this->_seed_mode + "_" + to_string(this->args.k_seed) + this->_prob_mode + ".txt";
+            
+            log_info("--- Arguments ---");
+            log_info("k_seed", this->args.k_seed);
+            log_info("k_edges", this->args.k_edges);
+            log_info("num_cand_edges", this->args.num_cand_edges);
+            log_info("epsilon", this->args.epsilon);
+            log_info("delta", this->args.delta);
+            log_info("seed_mode", this->_seed_mode);
+            log_info("random seed", this->args.rand_seed);
+            log_info("beta", this->args.beta);
+            log_info("num_samples", this->args.num_samples);
             return;
         }
 
@@ -201,10 +196,10 @@ class InfGraph: public GraphBase {
             return;
         }
 
-        void set_rand_seed(uint32_t rand_seed) {
-            this->_rand_seed = rand_seed;
-            return;
-        }
+        // void set_rand_seed(uint32_t rand_seed) {
+        //     this->_rand_seed = rand_seed;
+        //     return;
+        // }
 
         void set_seed(string seed_mode = "RAND", bool from_file=false) {
             ASSERT(this->_cur_working_folder != "");
@@ -661,6 +656,11 @@ class InfGraph: public GraphBase {
                             avg_w_out = this->_weighted_out_degree[seed] / st_outdeg;
                         }
                         w = (avg_w_in + avg_w_out) / 2;
+                        if (w > 1.0)
+                        {
+                            ExitMessage("probability over 1, please check");
+                        }
+                        
                     } else
                         w = std::max(1 - this->_weighted_in_degree[i], 0.0);
                     if (w > 1.0) {
@@ -1441,7 +1441,7 @@ class InfGraph: public GraphBase {
             ASSERT(this->_seed_set_to_augment.size() > 0);
             ASSERT(this->_cur_RRsets_num > 0);
 
-            string log_filename = this->_cur_working_folder + "log_IMA.txt";
+            string log_filename = this->_cur_working_folder + "log_AIS.txt";
             ofstream log_file(log_filename);
 
             Timer timer("AIS");
@@ -1470,20 +1470,72 @@ class InfGraph: public GraphBase {
             }
             timer.log_total_time(log_file);
             
-            write_UVWEdges(this->_vec_selected_edges, this->_cur_working_folder+"selected_edges_IMA.txt");
+            string edges_save_path = this->_cur_working_folder+"selected_edges_AIS.txt";
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
             log_file << "Result by AIS: " << this->comp_inf_cov_by_S() << '\n';
             log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
             
             return;
         }
 
-        void select_edges_by_AISPAC() {
+        void AIS(string log_filepath="") {
+            ASSERT(this->_seed_set_to_augment.size() > 0);
+            ASSERT(this->_cur_RRsets_num > 0);
+
+            // string log_filename = this->_cur_working_folder + "log_IMA.txt";
+            log_info("--- Start Reading Candidate Edges ---");
+            this->read_cand_edges();
+
+            if (log_filepath.size() == 0) {
+                log_filepath = this->_cur_working_folder + "log_AIS.txt";
+            }
+            ofstream log_file(log_filepath, std::ios::app);
+            // ofstream log_file(log_filepath);
+
+            Timer timer("AIS");
+            log_info("--- Initializing the marginal coverage array ---");
+            
+            this->init_seed_cov();
+            log_file << "Original Inf: " << this->comp_inf_cov_by_S() << '\n';
+            
+            timer.log_operation_time("Init seed cov", log_file);
+            
+            // log_info("--- Start Computing the marginal gains of the edges ---");
+            // this->comp_edges_gain();
+            this->_vec_bool_cand_edges_selected.resize(this->_vec_cand_edges.size(), false);
+
+            for (uint32_t i = 0; i < this->args.k_edges; i++) {
+                size_t best_idx = this->get_idx_max_marginal_gain();
+                this->_vec_selected_edges.push_back(this->_vec_cand_edges[best_idx]);
+                this->_vec_bool_cand_edges_selected[best_idx] = true;
+                
+                // update the RR sets
+                UVWEdge& added_edge = this->_vec_cand_edges[best_idx];
+                uint32_t u = added_edge.first, v = added_edge.second.first;
+                double w = added_edge.second.second;
+                this->augment_RRsets_early_stop(u, v, w);
+            }
+            timer.log_operation_time("Selection", log_file);
+            
+            string edges_save_path = this->_cur_working_folder+"selected_edges_AIS.txt";
+
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
+            log_file << "Result by AIS: " << this->comp_inf_cov_by_S() << '\n';
+            log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
+            
+            return;
+        }
+
+        void select_edges_by_AISPAC(string log_filepath="") {
             ASSERT(this->_seed_set_to_augment.size() > 0);
             ASSERT(this->_cur_RRsets_num > 0);
             // preparation
-            string log_filename = this->_cur_working_folder + "log_AISPAC.txt";
-            ofstream log_file(log_filename);
 
+            if (log_filepath.size() == 0) {
+                log_filepath = this->_cur_working_folder + "log_AISPAC.txt";
+            }
+            ofstream log_file(log_filepath, std::ios::app);
+            
             Timer timer("AISPAC");
 
             log_info("--- Initializing coverage boolean arrays ---");
@@ -1506,15 +1558,64 @@ class InfGraph: public GraphBase {
             
             // optimize PMC
             double res_inf = this->edge_selection_with_PMC(this->args.k_edges);
-
+            timer.log_operation_time("Selection", log_file);
+            
             // self-evaluate
             this->update_RRsets_cov_by_S(this->_vec_selected_edges);
             
             // write resulting edges
-            timer.log_total_time(log_file);
             
-            write_UVWEdges(this->_vec_selected_edges, this->_cur_working_folder+"selected_edges_AISPAC.txt");
-            log_file << "Result by AISPAC: " << res_inf << '\n';
+            string edges_save_path = this->_cur_working_folder+"selected_edges_AISPAC.txt";
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
+            // log_file << "Result by AISPAC: " << res_inf << '\n';
+            log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
+            return;
+        }
+
+        void select_edges_by_AugIM(string log_filepath="") {
+            ASSERT(this->_seed_set_to_augment.size() > 0);
+            ASSERT(this->_cur_RRsets_num > 0);
+            ASSERT(this->_vec_cand_edges.size() > 0);
+            if (log_filepath.size() == 0) {
+                log_filepath = this->_cur_working_folder + "log_AugIM.txt";
+            }
+            ofstream log_file(log_filepath, std::ios::app);
+            
+            Timer timer("AugIM");
+            
+            log_info("--- Initializing coverage boolean arrays ---");
+            this->init_seed_cov();
+            log_file << "Original Inf: " << this->comp_inf_cov_by_S() << '\n';
+
+            VecVecLargeNum RRsets_for_edges(this->_cur_RRsets_num);
+            VecVecLargeNum edge_to_RRsets(this->_vec_cand_edges.size());
+
+            // For every edge, initialize its RR sets. Re-organize RR sets for edges
+            int cnt = 0, all_cnt = 0;
+            for (size_t i=0; i<this->_vec_cand_edges.size(); i++)
+            {
+                auto& cand_edge = this->_vec_cand_edges[i];
+                uint32_t u = cand_edge.first, v = cand_edge.second.first;
+                double puv = cand_edge.second.second;
+                for (size_t RR_idx : this->_node_to_RRsets[v]) {
+                    // all_cnt++;
+                    if (!this->_vec_bool_RRset_cov_by_S[RR_idx] && dsfmt_gv_genrand_open_close() < puv) {
+                        RRsets_for_edges[RR_idx].push_back(i);
+                        edge_to_RRsets[i].push_back(RR_idx);
+                        // cnt++;
+                    }
+                }
+            }
+            timer.log_operation_time("Sampling 2", log_file);
+            // Selection
+            VecLargeNum vec_selected_idx = max_cover_by_heap(edge_to_RRsets, RRsets_for_edges, this->args.k_edges);
+            timer.log_operation_time("Selection", log_file);
+            
+            for (auto i : vec_selected_idx) {
+                this->_vec_selected_edges.push_back(this->_vec_cand_edges[i]);
+            }
+            string edges_save_path = this->_cur_working_folder+"selected_edges_AugIM.txt";
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
             log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
             return;
         }
@@ -1532,13 +1633,15 @@ class InfGraph: public GraphBase {
                 make_dir(this->folder + "params/");
             }
 
-            string cur_folder_name = this->folder + "params/" + to_string(this->args.k_edges) + "_" + to_string(this->args.num_cand_edges) + "_" + to_string(this->args.epsilon) + "_" + to_string(this->args.delta) + "_" + to_string(this->_rand_seed) + "_" + this->_prob_mode;
+            string cur_folder_name = this->folder + "params/" + to_string(this->args.k_edges) + "_" + to_string(this->args.num_cand_edges) + "_" + to_string(this->args.epsilon) + "_" + to_string(this->args.delta) + "_" + to_string(this->args.rand_seed) + "_" + this->_prob_mode;
             if (this->_seed_mode != "IM")
-                cur_folder_name = this->folder + "params/" + to_string(this->args.k_edges) + "_" + to_string(this->args.num_cand_edges) + "_" + to_string(this->args.epsilon) + "_" + to_string(this->args.delta) + "_" + to_string(this->_rand_seed) + "_" + this->_seed_mode + "seed_" + this->_prob_mode;
+                cur_folder_name = this->folder + "params/" + to_string(this->args.k_edges) + "_" + to_string(this->args.num_cand_edges) + "_" + to_string(this->args.epsilon) + "_" + to_string(this->args.delta) + "_" + to_string(this->args.rand_seed) + "_" + this->_seed_mode + "seed_" + this->_prob_mode;
             if (this->args.beta > 1) {
                 cur_folder_name = cur_folder_name + "_beta_" + to_string(this->args.beta);
             }
-            
+            if (this->args.num_samples != 0) {
+                cur_folder_name = cur_folder_name + "_numsamples_" + to_string(this->args.num_samples);
+            }
             bool flag = make_dir(cur_folder_name);
             if (flag)
             {
