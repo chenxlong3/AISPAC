@@ -56,4 +56,32 @@ typedef std::pair<uint32_t, Edge> UVWEdge;
 enum CascadeModel { IC, LT };
 enum RRsetMode {EST, COV};
 enum SEED_MODE {RAND, IM, OUTDEG};
+
+struct CompareBySecond {
+	bool operator()(PairIntInt a,PairIntInt b)
+	{
+		return a.second < b.second;
+	}
+};
+
+struct CompareBySecondSizet {
+	bool operator()(PairIntSizet a,PairIntSizet b)
+	{
+		return a.second < b.second;
+	}
+};
+
+struct CompareBySecondDouble {
+	bool operator()(PairIntDouble a, PairIntDouble b)
+	{
+		return a.second < b.second;
+	}
+};
+
+struct CompareBySecondDoubleForSizet {
+	bool operator()(PairSizetDouble a, PairSizetDouble b)
+	{
+		return a.second < b.second;
+	}
+};
 #endif
