@@ -25,7 +25,7 @@ public:
         this->folder = folder_name;
         const string attr_filename = folder_name + "attr.txt";
         const string filename = folder_name + f_name;
-        // const string filename = "/root/research_proj/dyn_IM/my_proj/data/DBLP.txt";
+        
         log_info("File:");
         cout << filename << endl;
         ifstream file(filename);
