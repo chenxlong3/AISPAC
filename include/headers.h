@@ -18,9 +18,8 @@
 #include <algorithm>
 #include <numeric>
 
-#define DSFMT_MEXP 19937
 #include "SFMT/dSFMT/dSFMT.h"
-
+#define DSFMT_MEXP 19937
 #if !defined(DSFMT_MEXP)
 #ifdef __GNUC__
 #define DSFMT_MEXP 19937
