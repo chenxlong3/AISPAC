@@ -2,8 +2,7 @@
 #define INF_GRAPH_H
 #include "GraphBase.h"
 #include "Timer.h"
-
-
+#include "ResultInfo.h"
 
 // All arguments passed to func
 class Argument{
@@ -20,7 +19,7 @@ public:
     string method="";
 
     uint32_t k_seed=0, k_edges = 0, beta = 1;
-    double epsilon = 0;
+    double epsilon = -0.1;
     double delta=0;
     
     bool fast_truncated = true;
@@ -55,7 +54,7 @@ public:
             ExitMessage("argument k_seed missing");
         if (this->k_edges == 0)
             ExitMessage("argument k_edges missing");
-        if (this->epsilon == 0)
+        if (this->epsilon < 0)
             ExitMessage("argument epsilon missing");
         if (this->delta == 0)
             ExitMessage("argument delta missing");
@@ -80,16 +79,22 @@ public:
             log_info("argument graph_file missing, vec.graph as default");
             this->graph_file = "vec.graph";
         }
-
+        if (this->num_samples > 0)
+        {
+            this->epsilon = 0;
+        }
+        
         return;
     }
 };
 
 class InfGraph: public GraphBase {
     public:
-        
         VecVecInt32 _RRsets;      // _RRsets[i] is the vector storing nodes of the i-th RRset
         VecVecLargeNum _node_to_RRsets;  // _node_to_RRsets[i] is the vector storing the indices of RR sets containing node i
+        VecVecInt32 _RRsets_val;      // _RRsets[i] is the vector storing nodes of the i-th RRset
+        VecVecLargeNum _node_to_RRsets_val;  // _node_to_RRsets[i] is the vector storing the indices of RR sets containing node i
+
         CascadeModel _casc_model = IC;
         NodeList _seed_set_IM;
         NodeList _seed_set_to_augment;
@@ -98,6 +103,7 @@ class InfGraph: public GraphBase {
         VecBool _vec_bool_vis;
         VecBool _vec_bool_seed;
         size_t _cur_RRsets_num=0;
+        size_t _cur_RRsets_num_val=0;
         LL _num_traversed_edges=0, _tmp_num_traversed_edges=0;
         VecSetInt _SET_RRsets;
         VecLargeNum _marginal_cov;
@@ -117,6 +123,7 @@ class InfGraph: public GraphBase {
         std::vector<UVWEdge> _vec_selected_edges_MCGreedy;   // vector of selected edges by degree
         std::vector<UVWEdge> _vec_selected_edges_PROB;   // vector of selected edges by degree
         std::vector<std::priority_queue<PairSizetDouble, std::vector<PairSizetDouble>, CompareBySecondDoubleForSizet>> _vec_node_prob_heap;
+        std::vector<std::vector<PairSizetDouble>> _vec_node_prob_vec;
         
         string _cur_working_folder = "";
         string _cand_edges_filename = "";
@@ -136,6 +143,7 @@ class InfGraph: public GraphBase {
 
         InfGraph(string folder_name, string f_name, string prob_mode): GraphBase(folder_name, f_name, prob_mode) {
             this->_node_to_RRsets.resize(this->n);
+            this->_node_to_RRsets_val.resize(this->n);
             this->_vec_bool_vis.resize(this->n, false);
             this->_vec_bool_seed.resize(this->n, false);
             // this->_node_sampled_times.resize(this->n, 0);
@@ -195,11 +203,6 @@ class InfGraph: public GraphBase {
             log_info("beta", this->args.beta);
             return;
         }
-
-        // void set_rand_seed(uint32_t rand_seed) {
-        //     this->_rand_seed = rand_seed;
-        //     return;
-        // }
 
         void set_seed(string seed_mode = "RAND", bool from_file=false) {
             ASSERT(this->_cur_working_folder != "");
@@ -397,23 +400,148 @@ class InfGraph: public GraphBase {
             return cov_by_S;
         }
 
-        void build_RRsets(size_t num_RRsets, bool fast_truncated=false) {
+        bool build_one_RRset_val(uint32_t v, const size_t RRset_idx, const bool flag_count_edges=false, bool fast_trunc_or_not=false) {
+            NodeList vec_vis_nodes;         // The list of visited nodes
+            size_t num_visit_node = 0, cur_idx = 0;     // Number of activated nodes; Current traversal index
+            uint32_t num_trav_edges = 0;
+            // For v, the target node
+            this->_node_to_RRsets_val[v].push_back(RRset_idx);
+            vec_vis_nodes.push_back(v);
+            num_visit_node++;
+            this->_vec_bool_vis[v] = true;
+            bool end_flag = false;
+            bool cov_by_S = false;
+            if (this->_vec_bool_seed[v])  // If the target node is a seed node and
+            {
+                cov_by_S = true;
+                if (fast_trunc_or_not) {
+                    end_flag = true;
+                }
+            }
+
+            while (cur_idx < num_visit_node && !end_flag) {         // when there exist new nodes and we have not encountered any seed node
+                const auto expand = vec_vis_nodes[cur_idx++];
+                num_trav_edges += this->_inv_G[expand].size();
+                if (this->_casc_model == IC) {
+                    for(auto& nbr: this->_inv_G[expand]) {
+                        const auto nbr_id = nbr.first;
+                        if (this->_vec_bool_vis[nbr_id]) {
+                            // if(num_visit_node == 1) std::cout << "Skip...";
+                            continue;
+                        }
+                        const auto rand_double = dsfmt_gv_genrand_open_close();
+                        if (rand_double <= nbr.second) {
+                            // The node nbr is activated
+                            vec_vis_nodes.push_back(nbr_id);
+                            num_visit_node++;
+                            this->_vec_bool_vis[nbr_id] = true;
+                            this->_node_to_RRsets_val[nbr_id].push_back(RRset_idx);
+                            if (this->_vec_bool_seed[nbr_id]) {
+                                cov_by_S = true;
+                                if (fast_trunc_or_not) {
+                                    end_flag = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                else if (this->_casc_model == LT) {
+                    if (this->_inv_G[expand].size() == 0) break;
+                    num_trav_edges += this->_inv_G[expand].size();
+                    const auto next_nbr_idx = gen_rand_node_by_weight_LT(this->_inv_G[expand]);
+                    if (next_nbr_idx >= this->_inv_G[expand].size()) break; 
+                    const auto nbr_id = this->_inv_G[expand][next_nbr_idx].first;
+                    if (this->_vec_bool_vis[nbr_id]) break;
+
+                    vec_vis_nodes.push_back(nbr_id);
+                    num_visit_node++;
+                    this->_vec_bool_vis[nbr_id] = true;
+                    this->_node_to_RRsets_val[nbr_id].push_back(RRset_idx);
+                }
+            }
+            
+            ASSERT(num_visit_node == (size_t)vec_vis_nodes.size());
+            
+            for (auto i=0; i<num_visit_node; i++) this->_vec_bool_vis[vec_vis_nodes[i]] = false;
+            this->_RRsets_val.push_back(vec_vis_nodes);
+            // NodeList().swap(vec_vis_nodes);
+            
+            if (flag_count_edges) {
+                this->_num_traversed_edges += num_trav_edges;
+            }
+            return cov_by_S;
+        }
+
+        void build_RRsets(size_t num_RRsets, bool fast_truncated=false, string RRsets_mode="select") {
             if (num_RRsets > SIZE_MAX) {
                 std::cout << "Error: The number of RR sets is too large." << std::endl;
                 exit(1);   
             }
-            const auto prev_size = this->_cur_RRsets_num;
-            this->_cur_RRsets_num = std::max(this->_cur_RRsets_num, num_RRsets);
-            std::cout << "current RR sets number: " << this->_cur_RRsets_num << std::endl;
-            for (auto i=prev_size; i<num_RRsets; i++) {
-                uint32_t rand_node = dsfmt_gv_genrand_uint32_range(this->n);
-                // this->_node_sampled_times[rand_node]++;
-                this->build_one_RRset(rand_node, i, false, fast_truncated);
+            if (RRsets_mode == "select") {
+                const auto prev_size = this->_cur_RRsets_num;
+                this->_cur_RRsets_num = std::max(this->_cur_RRsets_num, num_RRsets);
+                std::cout << "current RR sets number: " << this->_cur_RRsets_num << std::endl;
+                for (auto i = prev_size; i < num_RRsets; i++) {
+                    uint32_t rand_node = dsfmt_gv_genrand_uint32_range(this->n);
+                    // this->_node_sampled_times[rand_node]++;
+                    this->build_one_RRset(rand_node, i, false, fast_truncated);
+                }
+                ASSERT(this->_cur_RRsets_num == this->_RRsets.size());
+            } else {
+                const auto prev_size = this->_cur_RRsets_num_val;
+                this->_cur_RRsets_num_val = std::max(this->_cur_RRsets_num_val, num_RRsets);
+                std::cout << "current RR sets number: " << this->_cur_RRsets_num_val << std::endl;
+                for (auto i=prev_size; i<num_RRsets; i++) {
+                    uint32_t rand_node = dsfmt_gv_genrand_uint32_range(this->n);
+                    // this->_node_sampled_times[rand_node]++;
+                    this->build_one_RRset_val(rand_node, i, false, fast_truncated);
+                }
+                ASSERT(this->_cur_RRsets_num_val == this->_RRsets_val.size());
             }
-            ASSERT(this->_cur_RRsets_num == this->_RRsets.size());
             return;
         }
         
+        double gen_RRsets_by_stopping_rules(bool error_divide=true) {
+            double eps_over_k = this->args.epsilon / (double)this->args.k_edges;
+            if (!error_divide)  eps_over_k = this->args.epsilon;
+            double eps = eps_over_k / (2 + eps_over_k);
+            if (this->_vec_cand_edges.size() == 0) {
+                log_info("VITAL: Please load the candidate edges first.");
+                return 0.0;
+            }
+            uint32_t min_cand_n = (this->n < this->_vec_cand_edges.size()) ? this->n : this->_vec_cand_edges.size();
+            double delta = this->args.delta / (this->args.k_edges*min_cand_n);
+            uint32_t beta = this->args.beta;
+            uint32_t k_seed = this->_seed_set_to_augment.size();
+            ASSERT(k_seed > 0);
+
+            double Gamma = 2*(1 + eps)*(1 + eps/3)*log(2.0 / delta) / (eps*eps*beta);
+            if (!error_divide) {
+                Gamma = 2 * (1 + eps) * (1 + eps / 3) * (log(2.0 / delta) + logcnk(min_cand_n, this->args.k_edges)) / (eps * eps * beta);
+            }
+
+            size_t theta=0;
+            double Sigma=0.0;
+            log_info("Gamma", Gamma);
+            while (Sigma < Gamma) {
+                uint32_t rand_node = dsfmt_gv_genrand_uint32_range(this->n);
+                // this->_node_sampled_times[rand_node]++;
+                
+                bool end_flag = this->build_one_RRset(rand_node, this->_cur_RRsets_num, false, this->_truncated_or_not);
+                
+                this->_cur_RRsets_num++;
+                if (end_flag) {
+                    Sigma++;
+                }
+                theta++;
+            }
+            double est_inf = this->n * Gamma / theta;
+            log_info("Total Number of RR sets", theta);
+            log_info("Estimated Influence", est_inf);
+            return est_inf;
+        }
+
         double comp_inf_by_cov(const NodeList& vec_seed) {
             VecBool vec_bool_vis(this->_cur_RRsets_num);
             for (auto seed: vec_seed) {
@@ -573,6 +701,75 @@ class InfGraph: public GraphBase {
             return (double)cov_num / this->_cur_RRsets_num;
         }
         
+        double edge_selection_by_max_cover(VecVecLargeNum& vec_u, VecVecLargeNum& vec_v, VecLargeNum& res, bool add_topk=false) {
+            size_t num_u = vec_u.size();
+            size_t num_v = vec_v.size();
+            uint32_t target_size = this->args.k_edges;
+
+            // Use a heap to store the <node, coverage> pair
+            std::priority_queue<PairSizet, std::vector<PairSizet>, CompareBySecond> heap;
+            VecLargeNum coverage(num_u, 0);       // coverage[v] is the RR sets covered by v
+            int cnt = 0;
+            for(uint32_t i=0; i<num_u; i++) {
+                // store coverage
+                size_t node_i_cov = vec_u[i].size();
+                PairSizet tmp(make_pair(i, node_i_cov));
+                heap.push(tmp);
+                coverage[i] = node_i_cov;
+                
+            }
+
+            VecBool RRsets_mark(vec_v.size(), false);
+            VecBool node_mark(num_u, false);   
+
+            uint32_t max_idx;
+            size_t cov_num = 0;
+            while (res.size() < target_size) {
+                PairSizet top = heap.top();
+                heap.pop();
+                // Lazy Update
+                if (top.second > coverage[top.first]) {
+                    // Update coverage of top
+                    top.second = coverage[top.first];
+                    heap.push(top);
+                    continue;
+                }
+                max_idx = top.first;
+                VecLargeNum& e = vec_u[max_idx];     // e: the RR sets covered by the node max_idx
+                cov_num += coverage[max_idx];
+                res.push_back(max_idx);
+                node_mark[max_idx] = true;
+                
+                // After selecting one node, we need to remove the covered RR sets from the coverage graph
+                // e: the RR sets covered by the node max_idx
+                for (uint32_t j=0; j<e.size(); j++) {
+                    if (RRsets_mark[e[j]]) continue;        // If the RR set has been removed
+                    VecLargeNum node_list = vec_v[e[j]];
+                    
+                    for (uint32_t l=0; l<node_list.size(); ++l){
+                        if (!node_mark[node_list[l]]) {
+                            coverage[node_list[l]]--;
+                        }
+                    }
+                    RRsets_mark[e[j]] = true;
+                }
+            }
+            if (add_topk) {
+                for (auto i = 0; i < this->args.k_edges; i++) {
+                    PairSizet top = heap.top();
+                    heap.pop();
+                    cov_num += top.second;
+                }
+            }
+            
+            // Update selected edges
+            std::vector<UVWEdge>().swap(this->_vec_selected_edges);
+            for (auto i : res) {
+                this->_vec_selected_edges.push_back(this->_vec_cand_edges[i]);
+            }
+            return (double)cov_num;
+        }
+
         // Link Recommendation
         void generate_candidate_edges(size_t num) {
             ASSERT(this->_seed_set_to_augment.size() > 0);
@@ -716,7 +913,6 @@ class InfGraph: public GraphBase {
             this->args.num_cand_edges = this->_vec_cand_edges.size();
             return;
         }
-
 
         bool aug_insert_node_to_RRset(uint32_t u, size_t RRset_idx) {
             if (this->_SET_RRsets[RRset_idx].count(u) == 0) {
@@ -865,6 +1061,7 @@ class InfGraph: public GraphBase {
             }
             return idx;
         }
+        
         // update the coverage
         void update_RRsets_cov_by_S(std::vector<UVWEdge>& selected_edges) {
             ASSERT(this->_RRsets.size() > 0);
@@ -910,7 +1107,6 @@ class InfGraph: public GraphBase {
                 for (uint32_t node: this->_RRsets[i])
                 {
                     if (included_in_A[node]) {
-
                         for (double p : node_probs_map[node]) {
                             prob_not_cov *= (1.0 - p);
                         }
@@ -967,6 +1163,34 @@ class InfGraph: public GraphBase {
                 this->_vec_bool_seed[u] = true;
             }
             seed_file.close();
+            
+            return;
+        }
+
+        void organize_edges(string mode="heap") {
+            assert(this->_vec_cand_edges.size()>0);
+            if (mode == "heap")
+            {
+                this->_vec_node_prob_heap.resize(this->n);
+                // Traverse cand_edges and organize probability
+                for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
+                    uint32_t v = this->_vec_cand_edges[i].second.first;
+                    double puv = this->_vec_cand_edges[i].second.second;
+                    this->_vec_node_prob_heap[v].push(make_pair(i, puv));
+                }
+                log_info("Finish organizing prob into a heap");
+            }
+            else
+            {
+                this->_vec_node_prob_vec.resize(this->n);
+                // Traverse cand_edges and organize probability
+                for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
+                    uint32_t v = this->_vec_cand_edges[i].second.first;
+                    double puv = this->_vec_cand_edges[i].second.second;
+                    this->_vec_node_prob_vec[v].push_back(make_pair(i, puv));
+                }
+                log_info("Finish organizing prob into a heap");
+            }
             
             return;
         }
@@ -1482,6 +1706,12 @@ class InfGraph: public GraphBase {
             ASSERT(this->_seed_set_to_augment.size() > 0);
             ASSERT(this->_cur_RRsets_num > 0);
 
+            if (this->args.num_samples > 0) {
+                this->build_RRsets(this->args.num_samples, true);
+            }
+            else
+                this->gen_RRsets_by_stopping_rules(true);
+
             // string log_filename = this->_cur_working_folder + "log_IMA.txt";
             log_info("--- Start Reading Candidate Edges ---");
             this->read_cand_edges();
@@ -1530,6 +1760,7 @@ class InfGraph: public GraphBase {
             ASSERT(this->_seed_set_to_augment.size() > 0);
             ASSERT(this->_cur_RRsets_num > 0);
             // preparation
+            ResultInfo res;
 
             if (log_filepath.size() == 0) {
                 log_filepath = this->_cur_working_folder + "log_AISPAC.txt";
@@ -1543,18 +1774,21 @@ class InfGraph: public GraphBase {
             this->init_seed_cov();
             log_file << "Original Inf: " << this->comp_inf_cov_by_S() << '\n';
 
-            this->_vec_node_prob_heap.resize(this->n);
+            
             
             log_info("--- Start Reading Candidate Edges ---");
             this->read_cand_edges();
 
             // Traverse cand_edges and organize probability
-            for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
-                uint32_t v = this->_vec_cand_edges[i].second.first;
-                double puv = this->_vec_cand_edges[i].second.second;
-                this->_vec_node_prob_heap[v].push(make_pair(i, puv));
-            }
-            log_info("Finish organizing prob");
+            // this->_vec_node_prob_heap.resize(this->n);
+            // for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
+            //     uint32_t v = this->_vec_cand_edges[i].second.first;
+            //     double puv = this->_vec_cand_edges[i].second.second;
+            //     this->_vec_node_prob_heap[v].push(make_pair(i, puv));
+            // }
+            // log_info("Finish organizing prob");
+
+            this->organize_edges("heap");
             
             // optimize PMC
             double res_inf = this->edge_selection_with_PMC(this->args.k_edges);
@@ -1592,23 +1826,22 @@ class InfGraph: public GraphBase {
 
             // For every edge, initialize its RR sets. Re-organize RR sets for edges
             int cnt = 0, all_cnt = 0;
-            for (size_t i=0; i<this->_vec_cand_edges.size(); i++)
-            {
+            for (size_t i = 0; i < this->_vec_cand_edges.size(); i++) {
                 auto& cand_edge = this->_vec_cand_edges[i];
                 uint32_t u = cand_edge.first, v = cand_edge.second.first;
                 double puv = cand_edge.second.second;
                 for (size_t RR_idx : this->_node_to_RRsets[v]) {
-                    // all_cnt++;
                     if (!this->_vec_bool_RRset_cov_by_S[RR_idx] && dsfmt_gv_genrand_open_close() < puv) {
                         RRsets_for_edges[RR_idx].push_back(i);
                         edge_to_RRsets[i].push_back(RR_idx);
-                        // cnt++;
                     }
                 }
             }
             timer.log_operation_time("Sampling 2", log_file);
             // Selection
             VecLargeNum vec_selected_idx = max_cover_by_heap(edge_to_RRsets, RRsets_for_edges, this->args.k_edges);
+            double cov_num = comp_cov(edge_to_RRsets, RRsets_for_edges, vec_selected_idx) / RRsets_for_edges.size();
+            log_info("cov_num", cov_num);
             timer.log_operation_time("Selection", log_file);
             
             for (auto i : vec_selected_idx) {
@@ -1617,6 +1850,167 @@ class InfGraph: public GraphBase {
             string edges_save_path = this->_cur_working_folder+"selected_edges_AugIM.txt";
             write_UVWEdges(this->_vec_selected_edges, edges_save_path);
             log_file << "Result by AISPAC_est: " << this->estimate_by_pmc(this->_vec_selected_edges) << '\n';
+            return;
+        }
+
+        void sample_edges(VecVecLargeNum& edge_to_RRsets, VecVecLargeNum& RRsets_for_edges, string RRset_mode="select") {
+            assert(this->_vec_node_prob_vec.size()>0);
+            VecVecInt32& cur_RRsets = this->_RRsets;
+            VecVecLargeNum& cur_node_to_RRsets = this->_node_to_RRsets;
+            if (RRset_mode == "val") {
+                cur_RRsets = this->_RRsets_val;
+                cur_node_to_RRsets = this->_node_to_RRsets_val;
+            }
+            size_t RRsets_num = cur_RRsets.size();
+
+            if (RRsets_for_edges.size() == RRsets_num) {
+                return;
+            }
+
+            size_t edge_RRsets_num = RRsets_for_edges.size();
+            this->init_RRsets_cov_by_S();
+            for (size_t i = edge_RRsets_num; i < RRsets_num; i++)
+            {
+
+                RRsets_for_edges.push_back(VecLargeNum());
+                if (this->_vec_bool_RRset_cov_by_S[i])
+                {
+                    continue;
+                }
+                
+                VecuInt32& RRset = cur_RRsets[i];
+                for (auto node : RRset) {
+                    for (auto& idx_prob_pair : this->_vec_node_prob_vec[node]) {
+                        size_t e_idx = idx_prob_pair.first;
+                        double e_prob = idx_prob_pair.second;
+                        if (dsfmt_gv_genrand_open_close() < e_prob)
+                        {
+                            RRsets_for_edges[i].push_back(e_idx);
+                            edge_to_RRsets[e_idx].push_back(i);
+                        }
+                    }
+                }
+            }
+            return;
+        }
+
+        void OPIM_AISPAC() {
+            ASSERT(this->_seed_set_to_augment.size() > 0);
+            ASSERT(this->_vec_cand_edges.size() > 0);
+            this->organize_edges("heap");
+            // Initialize parameters
+            const double delta = this->args.delta;
+            const double e = exp(1);
+            const double approx = 1 - 1.0 / e;
+            const double alpha = sqrt(log(6.0 / delta));
+            const double beta = sqrt((1 - 1 / e) * (logcnk(this->n, this->args.k_edges) + log(6.0 / delta)));
+            const auto numRbase = size_t(2.0 * pow2((1 - 1 / e) * alpha + beta));
+            const auto maxNumR = size_t(2.0 * this->n * pow2((1 - 1 / e) * alpha + beta) / this->args.k_edges / pow2(this->args.epsilon)) + 1;
+            const auto numIter = (size_t)log2(maxNumR / numRbase) + 1;
+            const double a1 = log(numIter * 3.0 / delta);
+            const double a2 = log(numIter * 3.0 / delta);
+            double min_u_bound = __DBL_MAX__;
+            double time1 = 0.0, time2 = 0.0;
+
+            Timer timer_AugIM("OPIM_AugIM");
+            
+            VecVecLargeNum edge_to_RRsets(this->_vec_cand_edges.size());
+            VecVecLargeNum RRsets_for_edges(this->_cur_RRsets_num);
+            VecVecLargeNum edge_to_RRsets_val(this->_vec_cand_edges.size());
+            VecVecLargeNum RRsets_for_edges_val(this->_cur_RRsets_num_val);
+            this->organize_edges("vec");
+            timer_AugIM.log_operation_time("organizing");
+            
+            for (auto idx = 0; idx < numIter; idx++) {
+                const auto numR = numRbase << idx;
+                this->build_RRsets(numR, true, "select");
+                this->build_RRsets(numR, true, "val");
+                this->sample_edges(edge_to_RRsets, RRsets_for_edges, "select");
+                this->sample_edges(edge_to_RRsets_val, RRsets_for_edges_val, "val");
+                time1 += timer_AugIM.get_operation_time();
+
+                VecLargeNum selected_idx_vec;
+                double cov_num = edge_selection_by_max_cover(edge_to_RRsets, RRsets_for_edges, selected_idx_vec, true);
+                time2 += timer_AugIM.get_operation_time();
+
+                double cov_val = comp_cov(edge_to_RRsets, RRsets_for_edges, selected_idx_vec);
+
+                double upperbound = std::min(min_u_bound, (double)cov_num);
+                if (upperbound < min_u_bound)
+                {
+                    min_u_bound = upperbound;
+                }
+                log_info("cov_num", cov_num / (double)RRsets_for_edges.size());
+                const auto lowerSelect = pow2(sqrt(cov_val + a1 * 2.0 / 9.0) - sqrt(a1 / 2.0)) - a1 / 18.0;
+                const auto upperOPT = pow2(sqrt(cov_num + a2 / 2.0) + sqrt(a2 / 2.0));
+                const auto approxOPIMC = lowerSelect / upperOPT;
+                std::cout << " -->OPIM-C (" << idx + 1 << "/" << numIter << ") approx. (max-cover): " << approxOPIMC << ", #RR sets: " << this->_RRsets.size() << '\n';
+                if (approxOPIMC >= approx - this->args.epsilon) {
+                    break;
+                }
+            }
+            string edges_save_path = this->_cur_working_folder+"selected_edges_OPIM-AugIM.txt";
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
+            return;
+        }
+
+        void OPIM_AugIM() {
+            ASSERT(this->_seed_set_to_augment.size() > 0);
+            ASSERT(this->_vec_cand_edges.size() > 0);
+            this->organize_edges("vec");
+            // Initialize parameters
+            const double delta = this->args.delta;
+            const double e = exp(1);
+            const double approx = 1 - 1.0 / e;
+            const double alpha = sqrt(log(6.0 / delta));
+            const double beta = sqrt((1 - 1 / e) * (logcnk(this->n, this->args.k_edges) + log(6.0 / delta)));
+            const auto numRbase = size_t(2.0 * pow2((1 - 1 / e) * alpha + beta));
+            const auto maxNumR = size_t(2.0 * this->n * pow2((1 - 1 / e) * alpha + beta) / this->args.k_edges / pow2(this->args.epsilon)) + 1;
+            const auto numIter = (size_t)log2(maxNumR / numRbase) + 1;
+            const double a1 = log(numIter * 3.0 / delta);
+            const double a2 = log(numIter * 3.0 / delta);
+            double min_u_bound = __DBL_MAX__;
+            double time1 = 0.0, time2 = 0.0;
+
+            Timer timer_AugIM("OPIM_AugIM");
+            
+            VecVecLargeNum edge_to_RRsets(this->_vec_cand_edges.size());
+            VecVecLargeNum RRsets_for_edges(this->_cur_RRsets_num);
+            VecVecLargeNum edge_to_RRsets_val(this->_vec_cand_edges.size());
+            VecVecLargeNum RRsets_for_edges_val(this->_cur_RRsets_num_val);
+            this->organize_edges("vec");
+            timer_AugIM.log_operation_time("organizing");
+            
+            for (auto idx = 0; idx < numIter; idx++) {
+                const auto numR = numRbase << idx;
+                this->build_RRsets(numR, true, "select");
+                this->build_RRsets(numR, true, "val");
+                this->sample_edges(edge_to_RRsets, RRsets_for_edges, "select");
+                this->sample_edges(edge_to_RRsets_val, RRsets_for_edges_val, "val");
+                time1 += timer_AugIM.get_operation_time();
+
+                VecLargeNum selected_idx_vec;
+                double cov_num = edge_selection_by_max_cover(edge_to_RRsets, RRsets_for_edges, selected_idx_vec, true);
+                time2 += timer_AugIM.get_operation_time();
+
+                double cov_val = comp_cov(edge_to_RRsets, RRsets_for_edges, selected_idx_vec);
+
+                double upperbound = std::min(min_u_bound, (double)cov_num);
+                if (upperbound < min_u_bound)
+                {
+                    min_u_bound = upperbound;
+                }
+                log_info("cov_num", cov_num / (double)RRsets_for_edges.size());
+                const auto lowerSelect = pow2(sqrt(cov_val + a1 * 2.0 / 9.0) - sqrt(a1 / 2.0)) - a1 / 18.0;
+                const auto upperOPT = pow2(sqrt(cov_num + a2 / 2.0) + sqrt(a2 / 2.0));
+                const auto approxOPIMC = lowerSelect / upperOPT;
+                std::cout << " -->OPIM-C (" << idx + 1 << "/" << numIter << ") approx. (max-cover): " << approxOPIMC << ", #RR sets: " << this->_RRsets.size() << '\n';
+                if (approxOPIMC >= approx - this->args.epsilon) {
+                    break;
+                }
+            }
+            string edges_save_path = this->_cur_working_folder+"selected_edges_OPIM-AugIM.txt";
+            write_UVWEdges(this->_vec_selected_edges, edges_save_path);
             return;
         }
 
