@@ -1003,9 +1003,11 @@ class InfGraph: public GraphBase {
                     }
                 }
             }
+            
             log_info("--- Writing candidate edges to " + this->_cand_edges_filename + " ---");
             this->write_cand_edges(res);
             this->_vec_cand_edges = res;
+            TIO::save_file(this->_cand_edges_filename+".vec", this->_vec_cand_edges);
             return;
         }
 
@@ -1030,15 +1032,25 @@ class InfGraph: public GraphBase {
             }
             // std::vector<UVWEdge>().swap(this->_vec_cand_edges);
             ASSERT(this->_vec_cand_edges.size() == 0);
-            string filename = this->_cand_edges_filename;
-            ifstream myfile(filename);
-            uint32_t u, v;
-            double w;
-            while (myfile >> u >> v >> w) {
-                this->_vec_cand_edges.push_back(make_pair(u, Edge(v, w)));
+            
+            string filename = this->_cand_edges_filename + ".vec";
+            if (check_file_exist(filename))
+            {
+                TIO::load_file(filename, this->_vec_cand_edges);
+                this->args.num_cand_edges = this->_vec_cand_edges.size();
             }
-            myfile.close();
-            this->args.num_cand_edges = this->_vec_cand_edges.size();
+            else {
+                filename = this->_cand_edges_filename;
+                ifstream myfile(filename);
+                uint32_t u, v;
+                double w;
+                while (myfile >> u >> v >> w) {
+                    this->_vec_cand_edges.push_back(make_pair(u, Edge(v, w)));
+                }
+                myfile.close();
+                this->args.num_cand_edges = this->_vec_cand_edges.size();
+            }
+            
             return;
         }
 
@@ -2200,7 +2212,7 @@ class InfGraph: public GraphBase {
 
             double sampling_time= 0.0, selection_time = 0.0;
             ResultInfo res;
-            string log_filepath = this->_cur_working_folder + "log_AISPAC.txt";
+            string log_filepath = this->_cur_working_folder + "log_AugIM.txt";
             
             Timer timer_AugIM("OPIM_AugIM");
             
