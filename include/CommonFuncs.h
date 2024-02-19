@@ -239,64 +239,76 @@ inline void min_heap_replace_min_value(VecLargeNum& vec, const size_t& val)
 }
 
 VecLargeNum max_cover_by_heap(VecVecLargeNum& vec_u, VecVecLargeNum& vec_v, uint32_t target_size) {
-        size_t num_u = vec_u.size();
-        size_t num_v = vec_v.size();
-        VecLargeNum res;
-        // Use a heap to store the <node, coverage> pair
-        std::priority_queue<PairIntSizet, std::vector<PairIntSizet>, CompareBySecond> heap;
-        VecLargeNum coverage(num_u, 0);       // coverage[v] is the RR sets covered by v
-        int cnt = 0;
-        for(uint32_t i=0; i<num_u; i++) {
-            // store coverage
-            size_t node_i_cov = vec_u[i].size();
-            PairIntSizet tmp(make_pair(i, node_i_cov));
-            heap.push(tmp);
-            coverage[i] = node_i_cov;
-            
-        }
-
-        VecBool RRsets_mark(vec_v.size(), false);
-        VecBool node_mark(num_u, false);   
-
-        uint32_t max_idx;
-        size_t cov_num = 0;
-        while (res.size() < target_size) {
-            PairIntSizet top = heap.top();
-            heap.pop();
-            // Lazy Update
-            if (top.second > coverage[top.first]) {
-                // Update coverage of top
-                top.second = coverage[top.first];
-                heap.push(top);
-                continue;
-            }
-            max_idx = top.first;
-            VecLargeNum& e = vec_u[max_idx];     // e: the RR sets covered by the node max_idx
-            cov_num += coverage[max_idx];
-            res.push_back(max_idx);
-            node_mark[max_idx] = true;
-
-            
-            // After selecting one node, we need to remove the covered RR sets from the coverage graph
-            // e: the RR sets covered by the node max_idx
-            for (uint32_t j=0; j<e.size(); j++) {
-                if (RRsets_mark[e[j]]) continue;        // If the RR set has been removed
-                VecLargeNum node_list = vec_v[e[j]];
-                
-                
-                for (uint32_t l=0; l<node_list.size(); ++l){
-                    if (!node_mark[node_list[l]]) {
-                        coverage[node_list[l]]--;
-                    }
-                }
-                RRsets_mark[e[j]] = true;
-            }
-            if (max_idx == 56035)
-            {
-                log_info("56035", coverage[56035]);
-                log_info("56004", coverage[56004]);
-            }
-        }
-        return res;
+    size_t num_u = vec_u.size();
+    size_t num_v = vec_v.size();
+    VecLargeNum res;
+    // Use a heap to store the <node, coverage> pair
+    std::priority_queue<PairIntSizet, std::vector<PairIntSizet>, CompareBySecond> heap;
+    VecLargeNum coverage(num_u, 0);       // coverage[v] is the RR sets covered by v
+    int cnt = 0;
+    for(uint32_t i=0; i<num_u; i++) {
+        // store coverage
+        size_t node_i_cov = vec_u[i].size();
+        PairIntSizet tmp(make_pair(i, node_i_cov));
+        heap.push(tmp);
+        coverage[i] = node_i_cov;
+        
     }
+
+    VecBool RRsets_mark(vec_v.size(), false);
+    VecBool node_mark(num_u, false);   
+
+    uint32_t max_idx;
+    size_t cov_num = 0;
+    while (res.size() < target_size) {
+        PairIntSizet top = heap.top();
+        heap.pop();
+        // Lazy Update
+        if (top.second > coverage[top.first]) {
+            // Update coverage of top
+            top.second = coverage[top.first];
+            heap.push(top);
+            continue;
+        }
+        max_idx = top.first;
+        VecLargeNum& e = vec_u[max_idx];     // e: the RR sets covered by the node max_idx
+        cov_num += coverage[max_idx];
+        res.push_back(max_idx);
+        node_mark[max_idx] = true;
+
+        
+        // After selecting one node, we need to remove the covered RR sets from the coverage graph
+        // e: the RR sets covered by the node max_idx
+        for (uint32_t j=0; j<e.size(); j++) {
+            if (RRsets_mark[e[j]]) continue;        // If the RR set has been removed
+            VecLargeNum node_list = vec_v[e[j]];
+            
+            
+            for (uint32_t l=0; l<node_list.size(); ++l){
+                if (!node_mark[node_list[l]]) {
+                    coverage[node_list[l]]--;
+                }
+            }
+            RRsets_mark[e[j]] = true;
+        }
+    }
+    return res;
+}
+
+double comp_cov(VecVecLargeNum& vec_u, VecVecLargeNum& vec_v, VecLargeNum vec_seed)
+{
+    ASSERT(vec_seed.size() > 0);
+    std::vector<bool> vecBoolVst = std::vector<bool>(vec_v.size());
+    std::vector<bool> vecBoolSeed(vec_u.size());
+    for (auto seed : vec_seed) vecBoolSeed[seed] = true;
+    for (auto seed : vec_seed)
+    {
+        for (auto node : vec_u[seed])
+        {
+            vecBoolVst[node] = true;
+        }
+    }
+    return 1.0 * std::count(vecBoolVst.begin(), vecBoolVst.end(), true);
+}
+
 #endif
