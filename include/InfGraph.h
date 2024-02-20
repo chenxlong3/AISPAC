@@ -79,11 +79,10 @@ public:
             log_info("argument graph_file missing, vec.graph as default");
             this->graph_file = "vec.graph";
         }
-        if (this->num_samples > 0)
-        {
+        if (this->num_samples > 0) {
             this->epsilon = 0;
         }
-        
+
         return;
     }
 };
@@ -104,6 +103,7 @@ class InfGraph: public GraphBase {
         std::vector<uint32_t> _RRset_traversed_edges;
         VecBool _vec_bool_vis;
         VecBool _vec_bool_seed;
+        
         size_t _cur_RRsets_num=0;
         size_t _cur_RRsets_num_val=0;
         LL _num_traversed_edges=0, _tmp_num_traversed_edges=0;
@@ -704,8 +704,6 @@ class InfGraph: public GraphBase {
                 coverage[i] = node_i_cov;
             }
             log_info("Finish initializing marginal coverage, start selection");
-            std::cout << this->_vec_cand_edges[this->_vec_node_prob_heap[heap.top().first].top().first].first << " " << heap.top().first << " " << this->_vec_node_prob_heap[heap.top().first].top().second << std::endl;
-            log_info("Maximum coverage", heap.top().second);
             
             this->_vec_selected_edges.clear();
             uint32_t max_idx;
@@ -1048,6 +1046,7 @@ class InfGraph: public GraphBase {
                     this->_vec_cand_edges.push_back(make_pair(u, Edge(v, w)));
                 }
                 myfile.close();
+                TIO::save_file(this->_cand_edges_filename + ".vec", this->_vec_cand_edges);
                 this->args.num_cand_edges = this->_vec_cand_edges.size();
             }
             
@@ -1892,7 +1891,7 @@ class InfGraph: public GraphBase {
             log_info("--- Start Reading Candidate Edges ---");
             this->read_cand_edges();
             
-            double sampling_time = 0.0, selection_time = 0.0;
+            double sampling_time = 0.0, sampling_2_time = 0.0, selection_time = 0.0;
             ResultInfo res;
             Timer timer("AIS");
             if (this->args.num_samples > 0) {
@@ -1917,26 +1916,25 @@ class InfGraph: public GraphBase {
             this->init_seed_cov();
             double original_inf = this->comp_inf_cov_by_S();
             log_info("Original Inf", original_inf);
-            timer.log_operation_time("Init seed cov");
-            
-            // log_info("--- Start Computing the marginal gains of the edges ---");
-            // this->comp_edges_gain();
             this->_vec_bool_cand_edges_selected.resize(this->_vec_cand_edges.size(), false);
+            timer.log_operation_time("Init seed cov");
+                        
             
             for (uint32_t i = 0; i < this->args.k_edges; i++) {
                 size_t best_idx = this->get_idx_max_marginal_gain();
                 this->_vec_selected_edges.push_back(this->_vec_cand_edges[best_idx]);
                 this->_vec_bool_cand_edges_selected[best_idx] = true;
-                
+                selection_time += timer.get_operation_time();
                 // update the RR sets
                 UVWEdge& added_edge = this->_vec_cand_edges[best_idx];
                 uint32_t u = added_edge.first, v = added_edge.second.first;
                 double w = added_edge.second.second;
-                
+
                 this->augment_RRsets_early_stop(u, v, w);
+                sampling_2_time += timer.get_operation_time();
             }
             
-            selection_time = timer.get_operation_time();
+            // selection_time = timer.get_operation_time();
 
             string edges_save_path = this->_cur_working_folder+"selected_edges_AIS.txt";
             write_UVWEdges(this->_vec_selected_edges, edges_save_path);
@@ -1948,6 +1946,7 @@ class InfGraph: public GraphBase {
             res.set_k_edges(this->args.k_edges);
             res.set_influence_original(inf_self);
             res.set_sampling_time(sampling_time);
+            res.set_sampling_2_time(sampling_2_time);
             res.set_selection_time(selection_time);
             res.set_RR_sets_size(this->_cur_RRsets_num);
             res.save_to_file(log_filepath);
@@ -2018,7 +2017,7 @@ class InfGraph: public GraphBase {
             
             log_filepath = this->_cur_working_folder + "log_AugIM.txt";
             ResultInfo res;
-            double sampling_time = 0.0, selection_time = 0.0;
+            double sampling_time = 0.0, sampling_2_time=0.0, selection_time = 0.0;
             ofstream log_file(log_filepath, std::ios::app);
             
             Timer timer("AugIM");
@@ -2043,18 +2042,19 @@ class InfGraph: public GraphBase {
                     }
                 }
             }
-            sampling_time += timer.get_operation_time();
+            sampling_2_time += timer.get_operation_time();
             
             // Selection
             // VecLargeNum vec_selected_idx = max_cover_by_heap(edge_to_RRsets, RRsets_for_edges, this->args.k_edges);
             log_info("--- Start Edge Selection ---");
             VecLargeNum vec_selected_idx = max_cover_by_heap(edge_to_RRsets, RRsets_for_edges, this->args.k_edges);
-            selection_time = timer.get_operation_time();
-            double inf_self = (comp_cov(edge_to_RRsets, RRsets_for_edges, vec_selected_idx) + this->_vec_bool_RRset_cov_by_S.count()) * this->n / this->_cur_RRsets_num;
-            
+            this->_vec_selected_edges.clear();
             for (auto i : vec_selected_idx) {
                 this->_vec_selected_edges.push_back(this->_vec_cand_edges[i]);
             }
+            selection_time = timer.get_operation_time();
+            double inf_self = (comp_cov(edge_to_RRsets, RRsets_for_edges, vec_selected_idx) + this->_vec_bool_RRset_cov_by_S.count()) * this->n / this->_cur_RRsets_num;
+            
             string edges_save_path = this->_cur_working_folder+"selected_edges_AugIM.txt";
             write_UVWEdges(this->_vec_selected_edges, edges_save_path);
             
@@ -2062,6 +2062,7 @@ class InfGraph: public GraphBase {
             res.set_k_edges(this->args.k_edges);
             res.set_influence_original(inf_self);
             res.set_sampling_time(sampling_time);
+            res.set_sampling_2_time(sampling_2_time);
             res.set_selection_time(selection_time);
             res.set_RR_sets_size(this->_cur_RRsets_num);
             res.save_to_file(log_filepath);
@@ -2210,7 +2211,7 @@ class InfGraph: public GraphBase {
             const double a2 = log(numIter * 3.0 / delta);
             double min_u_bound = __DBL_MAX__;
 
-            double sampling_time= 0.0, selection_time = 0.0;
+            double sampling_time= 0.0, sampling_2_time = 0.0, selection_time = 0.0;
             ResultInfo res;
             string log_filepath = this->_cur_working_folder + "log_AugIM.txt";
             
@@ -2227,9 +2228,10 @@ class InfGraph: public GraphBase {
                 const auto numR = numRbase << idx;
                 this->build_RRsets(numR, true, "select");
                 this->build_RRsets(numR, true, "val");
+                sampling_time += timer_AugIM.get_operation_time();
                 this->sample_edges(edge_to_RRsets, RRsets_for_edges, "select");
                 this->sample_edges(edge_to_RRsets_val, RRsets_for_edges_val, "val");
-                sampling_time += timer_AugIM.get_operation_time();
+                sampling_2_time += timer_AugIM.get_operation_time();
 
                 VecLargeNum selected_idx_vec;
                 double cov_num = edge_selection_by_max_cover(edge_to_RRsets, RRsets_for_edges, selected_idx_vec, true);
@@ -2241,7 +2243,7 @@ class InfGraph: public GraphBase {
                 
                 log_info("cov_num", cov_num / (double)RRsets_for_edges.size());
                 const auto lowerSelect = pow2(sqrt(cov_val + a1 * 2.0 / 9.0) - sqrt(a1 / 2.0)) - a1 / 18.0;
-                const auto upperOPT = pow2(sqrt(cov_num + a2 / 2.0) + sqrt(a2 / 2.0));
+                const auto upperOPT = pow2(sqrt(min_u_bound + a2 / 2.0) + sqrt(a2 / 2.0));
                 const auto approxOPIMC = lowerSelect / upperOPT;
                 std::cout << " -->OPIM-C (" << idx + 1 << "/" << numIter << ") approx. (max-cover): " << approxOPIMC << ", #RR sets: " << this->_RRsets.size() << '\n';
                 if (approxOPIMC >= approx - this->args.epsilon) {
@@ -2251,6 +2253,7 @@ class InfGraph: public GraphBase {
                     res.set_influence_original(this->comp_cov_pmc(this->_vec_selected_edges, "select"));
                     res.set_influence(cov_val * this->n / this->_cur_RRsets_num);
                     res.set_sampling_time(sampling_time);
+                    res.set_sampling_2_time(sampling_2_time);
                     res.set_selection_time(selection_time);
                     res.set_RR_sets_size(this->_cur_RRsets_num*2);
                     res.save_to_file(log_filepath);
