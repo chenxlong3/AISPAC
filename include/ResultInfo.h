@@ -4,7 +4,7 @@
 class ResultInfo
 {
 private:
-	double _time_sampling = -1.0, _time_selection=-1.0, __Influence = -1.0, __InfluenceOriginal = -1.0, __Approx = -1.0;
+	double _time_sampling = 0.0, _time_sampling_2 = 0.0,_time_selection=0.0, __Influence = -1.0, __InfluenceOriginal = -1.0, __Approx = -1.0;
 	int _k_edges = 0;
 	size_t __RRsetsSize = 0;
 public:
@@ -19,11 +19,14 @@ public:
 	/// Get running time.
 	double get_total_time() const
 	{
-		return this->_time_sampling + this->_time_selection;
+		return this->_time_sampling + this->_time_sampling_2 + _time_selection;
 	}
 	
 	double get_sampling_time() {
 		return this->_time_sampling;
+	}
+	double get_sampling_2_time() {
+		return this->_time_sampling_2;
 	}
 
 	double get_selection_time() {
@@ -65,6 +68,10 @@ public:
 	{
 		this->_time_sampling = value;
 	}
+	void set_sampling_2_time(const double value)
+	{
+		this->_time_sampling_2 = value;
+	}
 	void set_selection_time(const double value) {
 		this->_time_selection = value;
 	}
@@ -100,7 +107,6 @@ public:
 
 	// Save results
 	void save_to_file(string filepath) {
-		
 		const auto approx = this->get_approximation();
 		const auto runTime = this->get_total_time();
 		const auto sampling_time = this->get_sampling_time();
@@ -127,6 +133,7 @@ public:
 			file_stream << "Approx.: " << approx << std::endl;
 			file_stream << "Time (sec): " << runTime << std::endl;
 			file_stream << "Sampling Time (sec): " << sampling_time << std::endl;
+			file_stream << "Sampling Phase 2 Time (sec): " << this->_time_sampling_2 << std::endl;
 			file_stream << "Selection Time (sec): " << selection_time << std::endl;
 			file_stream << "Influence: " << influence << std::endl;
 			file_stream << "Self-estimated influence: " << influenceOriginal << std::endl;
