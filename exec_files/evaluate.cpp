@@ -3,7 +3,11 @@
 
 int main(int argc, char *argv[])
 {
-   InfGraph g = parseArg(argc, argv);
+   Argument args = parse_args(argc, argv);
+   dsfmt_gv_init_gen_rand(args.rand_seed);
+   InfGraph g(args.folder_name, args.graph_file, args.probability_mode);
+   g.set_args(args);    // setting arguments
+   // InfGraph g = parseArg(argc, argv);
    string edges_mode = "";
    string eval_mode = "MC";
    uint32_t log_step = -1;
