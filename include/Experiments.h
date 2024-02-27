@@ -213,12 +213,12 @@ void evaluate_G_inf_IMA(InfGraph& g, uint32_t num_mc, string edges_mode="IMA", u
     return;
 }
 
-void evaluate_inf_by_cov(InfGraph& g, string edges_mode="IMA", uint32_t log_step = 5) {
+void evaluate_inf_by_cov(InfGraph& g, string edges_mode="AIS", uint32_t log_step = 5) {
     log_info("--- Start evaluating ---");
     VecDouble inf_spread;
     uint32_t upper = g.args.k_edges;
     VecuInt32 log_points;
-    for (uint32_t i = log_step; i <= upper; i += log_step) {
+    for (uint32_t i = 0; i <= upper; i += log_step) {
         log_points.push_back(i);
     }
     string selected_edges_filename = g._cur_working_folder + string("selected_edges_") + edges_mode + string(".txt");
@@ -231,21 +231,23 @@ void evaluate_inf_by_cov(InfGraph& g, string edges_mode="IMA", uint32_t log_step
     ASSERT(g._seed_set_to_augment.size() > 0);
     ASSERT(log_points.back() <= vec_selected_edges.size());
     ASSERT(g._cur_RRsets_num == 0);
-    // g.clean_RRsets_InfGraph();
-    // IEM::generate_RRsets_for_estimate(g);
-    // inf_spread.push_back(g.comp_inf_by_cov(g._seed_set_to_augment));
-    for (int i = 0; i < log_points.size(); i++) {
-        log_info("--- Start adding edges --- k=" + to_string(log_points[i]));
-        if (i==0)
-        {
-            g.add_edges(vec_selected_edges, 0, log_points[i]);
-        }
-        else g.add_edges(vec_selected_edges, log_points[i-1], log_points[i]);
-        log_info("--- Start simulation ---");
-        g.clean_RRsets_InfGraph();
+    g.clean_RRsets_InfGraph();
+    IEM::generate_RRsets_for_estimate(g);
+    inf_spread.push_back(g.comp_inf_by_cov(g._seed_set_to_augment));
+
+    for (int i = 0; i < log_points.size()-1; i++) {
+        log_info("--- Start adding edges --- k=" + to_string(log_points[i+1]));
+
+        // g.add_edges(vec_selected_edges, log_points[i], log_points[i+1]);
+        // log_info("--- Start simulation ---");
+        // g.clean_RRsets_InfGraph();
         // g.build_RRsets(ceil(g.n * log(g.n)), true);
-        IEM::generate_RRsets_for_estimate(g);
-        inf_spread.push_back(g.comp_inf_by_cov(g._seed_set_to_augment));
+        // IEM::generate_RRsets_for_estimate(g);
+        auto first = vec_selected_edges.begin();
+        auto last = vec_selected_edges.begin() + log_points[i+1];
+        g.init_RRsets_cov_by_S();
+        g.update_RRsets_cov_by_S(vec_selected_edges);
+        inf_spread.push_back(g.comp_inf_cov_by_S());
     }
 
     string filename = g._cur_working_folder + string("k_inf_spread_") + edges_mode + string(".csv");
@@ -347,7 +349,7 @@ void run_only_AISPAC(InfGraph& g) {
     IE::stopping_rules(g, false);
     timer.log_operation_time("RR set generation", log_file);
 
-    g.select_edges_by_AISPAC();
+    g.AISPAC();
     timer.log_till_now("AISPAC", log_file);
     return;
 }
@@ -507,61 +509,79 @@ void run_method(InfGraph& g) {
     string timer_name = method_name + "_" + g.folder;
     Timer timer = Timer(timer_name.c_str());
     // string param_folder = g._cur_working_folder;
-    string log_filename = g._cur_working_folder + "logs_" + method_name + ".txt";
-    ofstream log_file(log_filename);
     if (method_name == "ALL")
     {
         g.select_random_edges();
         g.select_edges_by_outdegree();
-        timer.log_operation_time("Select by outdeg", log_file);
+        // timer.log_operation_time("Select by outdeg", log_file);
         g.select_edges_by_prob();
-        timer.log_operation_time("Select by prob", log_file);
+        // timer.log_operation_time("Select by prob", log_file);
     }
-    
+    if (method_name == "RIS_p")
+    {
+        g.AIS_plus();
+        g.clean_RRsets_InfGraph();
+        g.AugIM();
+        g.clean_RRsets_InfGraph();
+        g.AISPAC();
+    }
+    if (method_name == "RIS")
+    {
+        g.AIS_plus();
+        g.clean_RRsets_InfGraph();
+        g.AugIM();
+        g.clean_RRsets_InfGraph();
+        g.AISPAC();
+    }
     if (method_name == "AIS") {
-        log_info("--- Start generating RR sets ---");
-        // IEM::generate_RRsets(g);
-
-        log_file.close();
-    
-        g.AIS(log_filename);
+        g.AIS();
         // timer.log_till_now("AIS", log_file);
 
         // g.select_edges_by_single_inf();
         // g.select_edges_by_updated_inf();
         // g.select_edges_by_AIS_U();
     }
+    if (method_name == "AIS_plus")
+    {
+        g.AIS_plus();
+    }
+    if (method_name == "AISPAC_2")
+    {
+        g.est_S_AISPAC();
+    }
+    if (method_name == "AugIM_2")
+    {
+        g.est_S_AugIM();
+    }
+    if (method_name == "est_S")
+    {
+        g.est_S_AugIM();
+        g.clean_RRsets_InfGraph();
+        g.est_S_AISPAC();
+    }
+    if (method_name == "AISes") {
+        g.AIS();
+        g.AIS_plus();
+    }
+    if (method_name == "OPIM")
+    {
+        g.clean_RRsets_InfGraph();
+        g.AugIM();
+        g.clean_RRsets_InfGraph();
+        g.AISPAC();
+    }
+    
     if (method_name == "AISPAC") {
-        log_info("--- Start generating RR sets ---");
-        if (g.args.num_samples > 0) {
-            g.build_RRsets(g.args.num_samples, true);
-        }
-        else
-            IE::stopping_rules(g, true);
-        timer.log_operation_time("RR set generation", log_file);
-        log_file.close();
 
-        g.select_edges_by_AISPAC(log_filename);
+        g.AISPAC();
         // timer.log_till_now("AISPAC", log_file);
     }
     if (method_name == "AugIM")
     {
-        log_info("--- Start generating RR sets ---");
-        if (g.args.num_samples > 0) {
-            g.build_RRsets(g.args.num_samples, true);
-        }
-        else
-            IE::stopping_rules(g, false);
-        timer.log_operation_time("RR set generation", log_file);
-        log_file.close();
-
-        g.select_edges_by_AugIM(log_filename);
+        g.AugIM();
     }
     
-    if (method_name == "OPIM-AugIM")
-    {
-        g.OPIM_AugIM();
-    }
+
     
     
 }
